@@ -4,43 +4,70 @@ import { User, Biscuit, ExchangeRule, InventoryItem, TradeLog, TradeResult, P2PT
 // CONFIG
 const SUPABASE_URL = 'https://ggwhjljqmxvwjfelfgxz.supabase.co';
 const SUPABASE_KEY = 'sb_publishable__Vn2SKMgbwTGwkKzPyXe0Q_XOsPMIAZ';
-const IMGBB_API_KEY = '70181233b2a623792a5a6fe64367f005';
 const FALLBACK_COOKIE_IMG = 'https://cdn-icons-png.flaticon.com/512/541/541732.png';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 export const BackendService = {
   
-  // --- IMGBB IMAGE HOSTING ---
-  // Returns object with url and deleteHash if successful
+  // --- IMGBB IMAGE HANDLING (VIA EDGE FUNCTION) ---
+  
   uploadImage: async (base64Image: string): Promise<{ url: string, deleteHash?: string } | null> => {
     try {
-      const formData = new FormData();
-      const cleanBase64 = base64Image.replace(/^data:image\/\w+;base64,/, "");
-      formData.append("image", cleanBase64);
-      
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+      // Strip Data URI prefix (data:image/png;base64,) to send raw base64 to ImgBB
+      const cleanBase64 = base64Image.replace(/^data:image\/[a-z]+;base64,/, "");
 
-      const res = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
-        method: "POST",
-        body: formData,
-        signal: controller.signal
+      const { data, error } = await supabase.functions.invoke('biscuit-barter', {
+        body: {
+          action: 'upload-image',
+          image: cleanBase64
+        }
       });
-      
-      clearTimeout(timeoutId);
-      
-      const data = await res.json();
-      if (data.success) {
+
+      if (error) {
+        console.error("Edge Function Upload Error:", error);
+        return null;
+      }
+
+      // --- CRITICAL: LOG FULL RESPONSE FOR USER DEBUGGING ---
+      if (data && data.raw) {
+        console.group("ImgBB Upload Debug Info");
+        console.log("Full Raw API Response:", data.raw);
+        console.log("Delete URL (Manual):", data.raw.data?.delete_url);
+        console.groupEnd();
+      }
+
+      if (data && data.success) {
         return {
-          url: data.data.url,
-          deleteHash: data.data.delete_hash // Storing the hash is best for API usage
+          url: data.url,
+          deleteHash: data.deleteHash
         };
       }
+      
       return null;
     } catch (e) {
-      console.warn("Upload timed out or failed:", e);
+      console.warn("Upload exception:", e);
       return null;
+    }
+  },
+
+  deleteImageFromHost: async (deleteHash: string): Promise<boolean> => {
+    try {
+      const { data, error } = await supabase.functions.invoke('biscuit-barter', {
+        body: {
+          action: 'delete-image',
+          deleteHash: deleteHash
+        }
+      });
+
+      if (error) {
+         console.warn("Edge Function Delete Error:", error);
+         return false;
+      }
+      return data?.success || false;
+    } catch (e) {
+      console.warn("Delete exception:", e);
+      return false;
     }
   },
 
@@ -67,8 +94,15 @@ export const BackendService = {
   },
   
   getUserById: async (id: string): Promise<User | undefined> => {
-    const { data } = await supabase.from('users').select('*').eq('id', id).single();
+    const { data, error } = await supabase.from('users').select('*').eq('id', id).single();
+    
+    if (error && error.code !== 'PGRST116') {
+       // Log genuine errors (not just 'Row not found')
+       console.error("getUserById DB Error:", error);
+    }
+
     if (!data) return undefined;
+
     return {
       id: data.id,
       name: data.name,
@@ -244,7 +278,7 @@ export const BackendService = {
       brand: b.brand,
       icon: b.icon,
       color: b.color,
-      imageDeleteHash: b.image_delete_hash // Back to mapping Hash
+      imageDeleteHash: b.image_delete_hash // Now stores Storage Path (filename)
     }));
   },
 
@@ -256,6 +290,10 @@ export const BackendService = {
       if (result) {
         updates.icon = result.url;
         deleteHash = result.deleteHash;
+        
+        // If we are replacing an existing image, try to delete the old one
+        // Note: Ideally we would fetch the old record first to get the old deleteHash, 
+        // but for now we prioritize the new upload.
       }
     }
 
@@ -288,12 +326,13 @@ export const BackendService = {
         }
       }
 
+      // Explicitly saving deleteHash to 'image_delete_hash' column
       const { data, error } = await supabase.from('biscuits').insert({
         name, 
         brand, 
         icon: finalIcon, 
         color,
-        image_delete_hash: deleteHash // Saving the Hash
+        image_delete_hash: deleteHash
       }).select().single();
 
       if (error) throw error;
@@ -318,17 +357,20 @@ export const BackendService = {
 
   deleteBiscuit: async (id: string): Promise<boolean> => {
     try {
-      // NOTE: We have removed the browser-side image deletion logic.
-      // Trying to delete from ImgBB via browser causes CORS errors (API) or 404s (Delete URL).
-      // The correct approach is to use a Supabase Edge Function to handle the deletion securely.
-      // For now, we only delete from our database to keep the app stable.
+      // 1. Get biscuit to find image hash
+      const { data: biscuit } = await supabase.from('biscuits').select('image_delete_hash').eq('id', id).single();
       
-      // 1. Database cleanup (Rules, Trades, Inventory)
+      // 2. Delete image via Supabase Storage
+      if (biscuit?.image_delete_hash) {
+        await BackendService.deleteImageFromHost(biscuit.image_delete_hash);
+      }
+      
+      // 3. Database cleanup (Rules, Trades, Inventory)
       await supabase.from('exchange_rules').delete().or(`from_biscuit_id.eq.${id},to_biscuit_id.eq.${id}`);
       await supabase.from('p2p_trades').delete().or(`offer_biscuit_id.eq.${id},request_biscuit_id.eq.${id}`);
       await supabase.from('inventory').delete().eq('biscuit_id', id);
 
-      // 2. Delete Biscuit Row
+      // 4. Delete Biscuit Row
       const { error } = await supabase.from('biscuits').delete().eq('id', id);
       
       if (error) {

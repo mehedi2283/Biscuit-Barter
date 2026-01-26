@@ -2,6 +2,9 @@ import React, { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
 
+// Fix for framer-motion type issues
+const MotionDiv = motion.div as any;
+
 interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -25,14 +28,14 @@ export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, icon, chil
     <AnimatePresence>
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <motion.div 
+          <MotionDiv 
             initial={{ opacity: 0 }} 
             animate={{ opacity: 1 }} 
             exit={{ opacity: 0 }}
             onClick={onClose}
             className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm"
           />
-          <motion.div 
+          <MotionDiv 
             initial={{ opacity: 0, scale: 0.95, y: 10 }} 
             animate={{ opacity: 1, scale: 1, y: 0 }} 
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
@@ -57,7 +60,7 @@ export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, icon, chil
             <div className="p-6 overflow-y-auto custom-scrollbar">
               {children}
             </div>
-          </motion.div>
+          </MotionDiv>
         </div>
       )}
     </AnimatePresence>

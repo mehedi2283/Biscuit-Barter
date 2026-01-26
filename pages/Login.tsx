@@ -3,6 +3,9 @@ import { useAuth } from '../context/AuthContext';
 import { Cookie, ArrowRight, UserPlus, LogIn, Lock, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
+// Fix for framer-motion type issues
+const MotionDiv = motion.div as any;
+
 export const Login: React.FC = () => {
   const { login, register } = useAuth();
   const [isRegistering, setIsRegistering] = useState(false);
@@ -67,7 +70,7 @@ export const Login: React.FC = () => {
          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-slate-800/20 via-slate-950 to-slate-950" />
       </div>
 
-      <motion.div 
+      <MotionDiv 
         layout
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -84,7 +87,7 @@ export const Login: React.FC = () => {
         <form onSubmit={handleSubmit} className="space-y-4">
           <AnimatePresence>
             {isRegistering && (
-              <motion.div
+              <MotionDiv
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
@@ -100,7 +103,7 @@ export const Login: React.FC = () => {
                      placeholder="e.g. Cookie Monster"
                    />
                 </div>
-              </motion.div>
+              </MotionDiv>
             )}
           </AnimatePresence>
 
@@ -130,12 +133,12 @@ export const Login: React.FC = () => {
           </div>
 
           {error && (
-            <motion.div 
+            <MotionDiv 
               initial={{ opacity: 0 }} animate={{ opacity: 1 }}
               className="text-red-400 text-xs text-center font-medium bg-red-400/10 py-3 px-2 rounded border border-red-500/20"
             >
               {error}
-            </motion.div>
+            </MotionDiv>
           )}
 
           <button 
@@ -169,7 +172,7 @@ export const Login: React.FC = () => {
           </button>
         </div>
 
-      </motion.div>
+      </MotionDiv>
     </div>
   );
 };

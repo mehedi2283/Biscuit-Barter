@@ -21,6 +21,10 @@ const BRAND_COLORS = [
   { name: 'Pink', class: 'bg-pink-600' },
 ];
 
+// Fix for framer-motion type issues
+const MotionDiv = motion.div as any;
+const MotionButton = motion.button as any;
+
 // --- Sub-components for Trade UI ---
 
 const MarketTradeCard: React.FC<{
@@ -440,7 +444,7 @@ export const Dashboard: React.FC = () => {
       {/* Loading Overlay */}
       <AnimatePresence>
         {isProcessing && (
-           <motion.div 
+           <MotionDiv 
              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
              className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-[100] flex items-center justify-center"
            >
@@ -448,7 +452,7 @@ export const Dashboard: React.FC = () => {
                <Loader2 className="animate-spin text-amber-500" size={40} />
                <span className="text-white font-bold text-sm tracking-wide uppercase">Processing...</span>
              </div>
-           </motion.div>
+           </MotionDiv>
         )}
       </AnimatePresence>
 
@@ -623,7 +627,7 @@ export const Dashboard: React.FC = () => {
 
             <AnimatePresence>
               {notification && (
-                <motion.div 
+                <MotionDiv 
                   initial={{ opacity: 0, x: 20 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0 }}
@@ -633,7 +637,7 @@ export const Dashboard: React.FC = () => {
                   )}
                 >
                   {notification.msg}
-                </motion.div>
+                </MotionDiv>
               )}
             </AnimatePresence>
           </div>
@@ -691,7 +695,7 @@ export const Dashboard: React.FC = () => {
           <div className="mb-8">
             <AnimatePresence mode='wait'>
             {!isCreating ? (
-              <motion.button 
+              <MotionButton 
                 initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                 onClick={() => setIsCreating(true)}
                 className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-dashed border-slate-700 hover:border-amber-500/50 rounded-xl font-medium transition-all flex items-center justify-center gap-3 group shadow-sm hover:shadow-md hover:text-amber-500"
@@ -700,9 +704,9 @@ export const Dashboard: React.FC = () => {
                    <Plus size={18} />
                 </div>
                 Create New Exchange Offer
-              </motion.button>
+              </MotionButton>
             ) : (
-              <motion.div 
+              <MotionDiv 
                 initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
                 className="bg-slate-900 p-6 rounded-xl border border-slate-700 shadow-xl overflow-hidden"
               >
@@ -742,7 +746,7 @@ export const Dashboard: React.FC = () => {
                     Post Trade
                   </button>
                 </form>
-              </motion.div>
+              </MotionDiv>
             )}
             </AnimatePresence>
           </div>

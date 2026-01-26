@@ -5,7 +5,7 @@ import { CustomSelect } from '../components/CustomSelect';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { Modal } from '../components/Modal';
 import { BiscuitIcon } from '../components/BiscuitIcon';
-import { Plus, Trash2, RefreshCcw, User as UserIcon, ArrowRight, History, Cookie, Settings, Check, X, Lock, Unlock, Pen, Upload, Info, Loader2 } from 'lucide-react';
+import { Plus, Trash2, RefreshCcw, User as UserIcon, ArrowRight, History, Cookie, Settings, Check, X, Lock, Unlock, Pen, Upload, Info, Loader2, ExternalLink } from 'lucide-react';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -365,6 +365,19 @@ export const AdminDashboard: React.FC = () => {
                       <Loader2 className="animate-spin text-red-500 mb-2" size={28} />
                       <span className="text-red-400 text-[10px] font-bold uppercase tracking-wider">Deleting...</span>
                     </div>
+                 )}
+
+                 {/* Manual Delete Link Indicator (Requested Feature) */}
+                 {b.imageDeleteHash && b.imageDeleteHash.startsWith('http') && (
+                   <a 
+                     href={b.imageDeleteHash} 
+                     target="_blank" 
+                     rel="noopener noreferrer"
+                     className="absolute top-2 left-2 p-1.5 bg-slate-800 rounded text-slate-500 hover:text-red-400 hover:bg-slate-700 opacity-0 group-hover:opacity-100 transition-all z-10"
+                     title="Open External Delete Page (Manual)"
+                   >
+                     <ExternalLink size={14} />
+                   </a>
                  )}
 
                  <BiscuitIcon biscuit={b} size="lg" />

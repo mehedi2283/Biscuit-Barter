@@ -4,6 +4,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Check } from 'lucide-react';
 import clsx from 'clsx';
 
+// Fix for framer-motion type issues
+const MotionDiv = motion.div as any;
+
 export interface SelectOption {
   value: string | number;
   label: string;
@@ -113,7 +116,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
           {/* Invisible backdrop to catch clicks outside */}
           <div className="absolute inset-0" onClick={() => setIsOpen(false)} />
           
-          <motion.div
+          <MotionDiv
             ref={dropdownRef}
             initial={{ opacity: 0, y: -5, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -159,7 +162,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
                 <div className="px-3 py-4 text-center text-xs text-slate-500 italic">No options available</div>
               )}
             </div>
-          </motion.div>
+          </MotionDiv>
         </div>,
         document.body
       )}

@@ -5,6 +5,9 @@ import { Biscuit, ExchangeRule } from '../types';
 import { BiscuitIcon } from './BiscuitIcon';
 import clsx from 'clsx';
 
+// Fix for framer-motion type issues
+const MotionDiv = motion.div as any;
+
 interface TradeCardProps {
   rule: ExchangeRule;
   fromBiscuit: Biscuit;
@@ -19,7 +22,7 @@ export const TradeCard: React.FC<TradeCardProps> = ({
   const canAfford = userBalance >= rule.fromQty;
 
   return (
-    <motion.div 
+    <MotionDiv 
       whileHover={{ y: -4 }}
       className={clsx(
         "relative rounded-2xl p-5 border transition-all duration-300",
@@ -79,6 +82,6 @@ export const TradeCard: React.FC<TradeCardProps> = ({
       >
         {canAfford ? 'SWAP NOW' : `NEED ${rule.fromQty - userBalance} MORE`}
       </button>
-    </motion.div>
+    </MotionDiv>
   );
 };
