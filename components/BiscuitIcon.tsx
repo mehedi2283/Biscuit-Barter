@@ -10,17 +10,17 @@ interface BiscuitIconProps {
 
 export const BiscuitIcon: React.FC<BiscuitIconProps> = ({ biscuit, size = 'md', className }) => {
   const sizeClasses = {
-    sm: 'w-8 h-8 text-lg',
-    md: 'w-12 h-12 text-2xl',
-    lg: 'w-16 h-16 text-3xl',
-    xl: 'w-24 h-24 text-6xl'
+    sm: 'w-10 h-10 text-xl',
+    md: 'w-16 h-16 text-3xl',
+    lg: 'w-24 h-24 text-5xl',
+    xl: 'w-32 h-32 text-7xl'
   };
 
   const isUrl = biscuit.icon.startsWith('http') || biscuit.icon.startsWith('data:image');
 
   return (
     <div className={clsx(
-      "rounded-full flex items-center justify-center shadow-lg relative overflow-hidden ring-1 ring-white/10 shrink-0",
+      "rounded-full flex items-center justify-center shadow-xl relative overflow-hidden ring-4 ring-slate-950/50 shrink-0 bg-slate-900",
       biscuit.color,
       sizeClasses[size],
       className
@@ -30,7 +30,7 @@ export const BiscuitIcon: React.FC<BiscuitIconProps> = ({ biscuit, size = 'md', 
         <img 
           src={biscuit.icon} 
           alt={biscuit.name} 
-          className="w-full h-full object-cover" 
+          className="w-full h-full object-cover transform hover:scale-110 transition-transform duration-500" 
         />
       ) : (
         <span className="relative z-10 drop-shadow-md transform hover:scale-110 transition-transform cursor-default filter contrast-125 select-none">

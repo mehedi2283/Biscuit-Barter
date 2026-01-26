@@ -2,12 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { BackendService, supabase } from '../services/backend';
-import { Biscuit, InventoryItem, P2PTrade } from '../types';
+import { Biscuit, InventoryItem, P2PTrade, P2PTradeType, TradeBid } from '../types';
 import { BiscuitIcon } from '../components/BiscuitIcon';
 import { Modal } from '../components/Modal';
 import { CustomSelect } from '../components/CustomSelect';
 import { ConfirmModal } from '../components/ConfirmModal';
-import { RefreshCw, Plus, Check, Clock, ShoppingBag, X, ArrowRight, PackagePlus, Cookie, Upload, Loader2, AlertCircle, History } from 'lucide-react';
+import { RefreshCw, Plus, Check, Clock, ShoppingBag, X, ArrowRight, PackagePlus, Cookie, Upload, Loader2, AlertCircle, History, Gavel, HandCoins, User } from 'lucide-react';
 import clsx from 'clsx';
 
 const BRAND_COLORS = [
@@ -41,54 +41,139 @@ const MarketTradeCard: React.FC<{
   const canAfford = userBalance >= trade.requestQty;
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col gap-4 hover:border-slate-700 transition-all shadow-sm group">
-      <div className="flex justify-between items-center">
-         <div className="flex items-center gap-2">
-           <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.5)]"></span>
-           <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Offer from {trade.creatorName}</span>
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 flex flex-col gap-6 hover:border-slate-600 transition-all shadow-lg group hover:shadow-2xl hover:shadow-black/50 relative overflow-hidden">
+      <div className="absolute top-0 right-0 p-2 opacity-50">
+        <RefreshCw size={100} className="text-slate-800 -rotate-12" />
+      </div>
+      
+      <div className="flex justify-between items-center border-b border-slate-800 pb-3 relative z-10">
+         <div className="flex items-center gap-3">
+           <div className="relative">
+             <div className="w-3 h-3 rounded-full bg-blue-500 animate-pulse shadow-[0_0_10px_rgba(59,130,246,0.5)]"></div>
+           </div>
+           <div>
+             <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block leading-none">Fixed Price</span>
+             <span className="text-sm font-bold text-white">{trade.creatorName}</span>
+           </div>
          </div>
-         <span className="text-[10px] text-slate-600 font-mono">#{trade.id.slice(0,4)}...</span>
+         <span className="text-[10px] text-slate-700 font-mono font-bold px-2 py-1 bg-slate-950 rounded">#{trade.id.slice(0,4)}</span>
       </div>
 
-      <div className="flex items-center justify-between px-2 py-2 bg-slate-950/50 rounded-lg border border-slate-800/50">
-        <div className="flex flex-col items-center gap-2">
-           <div className="relative">
-             <BiscuitIcon biscuit={offerB} size="md" />
-             <span className="absolute -top-2 -right-2 bg-slate-800 text-emerald-400 text-[9px] font-bold px-1.5 py-0.5 rounded border border-slate-700 shadow-sm">GET</span>
+      <div className="grid grid-cols-[1fr,auto,1fr] gap-4 items-center bg-slate-950/50 rounded-xl p-4 border border-slate-800/50 relative z-10">
+        {/* GET SIDE */}
+        <div className="flex flex-col items-center gap-2 p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/10 w-full transition-colors group-hover:bg-emerald-500/10">
+           <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-900/30 px-2 py-0.5 rounded">You Get</span>
+           <BiscuitIcon biscuit={offerB} size="md" className="shadow-2xl" />
+           <div className="text-center mt-1">
+             <span className="block text-2xl font-bold text-white leading-none">x{trade.offerQty}</span>
+             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide truncate max-w-[80px] block">{offerB.name}</span>
            </div>
-           <span className="text-xs font-bold text-slate-300">x{trade.offerQty} {offerB.name}</span>
         </div>
         
-        <div className="flex flex-col items-center text-slate-600">
-           <ArrowRight size={18} className="group-hover:text-slate-400 transition-colors" />
+        {/* ARROW */}
+        <div className="flex flex-col items-center justify-center text-slate-600">
+           <ArrowRight size={32} strokeWidth={2.5} className="group-hover:text-amber-500 transition-colors duration-300" />
         </div>
 
-        <div className="flex flex-col items-center gap-2">
-           <div className="relative">
-             <BiscuitIcon biscuit={reqB} size="md" />
-             <span className="absolute -top-2 -right-2 bg-slate-800 text-amber-500 text-[9px] font-bold px-1.5 py-0.5 rounded border border-slate-700 shadow-sm">GIVE</span>
+        {/* GIVE SIDE */}
+        <div className="flex flex-col items-center gap-2 p-3 rounded-xl bg-amber-500/5 border border-amber-500/10 w-full transition-colors group-hover:bg-amber-500/10">
+           <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest bg-amber-900/30 px-2 py-0.5 rounded">You Give</span>
+           <BiscuitIcon biscuit={reqB} size="md" className="shadow-2xl" />
+           <div className="text-center mt-1">
+             <span className={clsx("block text-2xl font-bold leading-none", canAfford ? "text-white" : "text-red-400")}>x{trade.requestQty}</span>
+             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide truncate max-w-[80px] block">{reqB.name}</span>
            </div>
-           <span className="text-xs font-bold text-amber-500">x{trade.requestQty} {reqB.name}</span>
         </div>
       </div>
 
-      <div className="pt-2">
-        <button 
-          onClick={onAccept}
-          disabled={!canAfford}
-          className={clsx(
-            "w-full py-3 rounded-lg font-bold text-xs uppercase tracking-wide transition-all flex items-center justify-center gap-2",
-            canAfford 
-              ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20 active:scale-[0.98]" 
-              : "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700"
-          )}
-        >
-          {canAfford ? (
-            <>Accept Deal <Check size={14} /></>
-          ) : (
-            <>Need {trade.requestQty - userBalance} more {reqB.name}</>
-          )}
-        </button>
+      <button 
+        onClick={onAccept}
+        disabled={!canAfford}
+        className={clsx(
+          "w-full py-4 rounded-xl font-bold text-sm uppercase tracking-widest transition-all flex items-center justify-center gap-3 relative z-10",
+          canAfford 
+            ? "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 active:scale-[0.98] hover:shadow-blue-500/20" 
+            : "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700 hover:bg-slate-800"
+        )}
+      >
+        {canAfford ? (
+          <>Accept Trade <Check size={18} strokeWidth={3} /></>
+        ) : (
+          <span className="flex items-center gap-2 text-red-400">
+             <X size={16}/> Insufficient Stock
+          </span>
+        )}
+      </button>
+    </div>
+  );
+};
+
+const AuctionTradeCard: React.FC<{
+  trade: P2PTrade;
+  biscuits: Biscuit[];
+  onBid: (biscuitId: string, qty: number) => void;
+}> = ({ trade, biscuits, onBid }) => {
+  const offerB = biscuits.find(b => b.id === trade.offerBiscuitId);
+  const prefB = biscuits.find(b => b.id === trade.requestBiscuitId);
+  const [bidQty, setBidQty] = useState(1);
+  const [bidBiscuitId, setBidBiscuitId] = useState(trade.requestBiscuitId || biscuits[0]?.id);
+
+  if (!offerB) return null;
+
+  const biscuitOptions = biscuits.map(b => ({ value: b.id, label: b.name, icon: b.icon }));
+
+  return (
+    <div className="bg-slate-900 border border-purple-500/30 rounded-2xl p-6 flex flex-col gap-6 hover:border-purple-500/60 transition-all shadow-lg group hover:shadow-2xl hover:shadow-purple-900/20 relative overflow-hidden">
+       {/* Decorative Background */}
+       <div className="absolute top-0 right-0 p-2 opacity-50">
+         <Gavel size={100} className="text-slate-800 -rotate-12" />
+       </div>
+
+      <div className="flex justify-between items-center border-b border-slate-800 pb-3 relative z-10">
+         <div className="flex items-center gap-3">
+           <div className="relative">
+             <div className="w-3 h-3 rounded-full bg-purple-500 animate-pulse shadow-[0_0_10px_rgba(168,85,247,0.5)]"></div>
+           </div>
+           <div>
+             <span className="text-xs text-purple-400 font-bold uppercase tracking-wider block leading-none">Auction</span>
+             <span className="text-sm font-bold text-white">{trade.creatorName}</span>
+           </div>
+         </div>
+         <span className="text-[10px] text-slate-700 font-mono font-bold px-2 py-1 bg-slate-950 rounded">#{trade.id.slice(0,4)}</span>
+      </div>
+
+      <div className="flex items-center justify-center py-2 relative z-10">
+         <div className="flex flex-col items-center gap-2 p-4 rounded-xl bg-purple-500/5 border border-purple-500/10 w-full">
+            <span className="text-[10px] font-black text-purple-400 uppercase tracking-widest bg-purple-900/30 px-2 py-0.5 rounded">Offered Item</span>
+            <div className="flex items-center gap-4">
+               <BiscuitIcon biscuit={offerB} size="lg" className="shadow-2xl ring-purple-500/30" />
+               <div className="flex flex-col">
+                  <span className="text-3xl font-bold text-white">x{trade.offerQty}</span>
+                  <span className="text-sm font-bold text-slate-400 uppercase">{offerB.name}</span>
+               </div>
+            </div>
+            {prefB && (
+               <div className="text-[10px] text-slate-500 mt-2 bg-slate-950 px-2 py-1 rounded border border-slate-800">
+                  Preferred: <span className="text-slate-300 font-bold">{trade.requestQty} {prefB.name}</span>
+               </div>
+            )}
+         </div>
+      </div>
+
+      <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800 relative z-10 space-y-3">
+         <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Your Bid</div>
+         <div className="flex gap-3">
+             <input type="number" min="1" value={bidQty} onChange={e => setBidQty(parseInt(e.target.value))} className="w-20 bg-slate-900 border border-slate-700 rounded-lg px-2 text-center text-white font-mono font-bold focus:border-purple-500 outline-none" />
+             <div className="flex-1">
+                <CustomSelect value={bidBiscuitId} onChange={setBidBiscuitId} options={biscuitOptions} />
+             </div>
+         </div>
+         <button 
+           onClick={() => onBid(bidBiscuitId, bidQty)}
+           className="w-full py-3 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-bold text-sm uppercase tracking-wide shadow-lg shadow-purple-900/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+         >
+           Place Bid <HandCoins size={16} />
+         </button>
       </div>
     </div>
   );
@@ -107,54 +192,202 @@ const PendingTradeRow: React.FC<{
 
   return (
     <div className={clsx(
-      "border rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative overflow-hidden transition-all",
-      isWaitingOnMe ? "bg-amber-500/5 border-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.05)]" : "bg-slate-900/50 border-slate-800"
+      "border rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden transition-all shadow-lg",
+      isWaitingOnMe ? "bg-amber-500/5 border-amber-500/30 shadow-amber-900/10" : "bg-slate-900/80 border-slate-800"
     )}>
-       {isWaitingOnMe && <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500" />}
+       {isWaitingOnMe && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-amber-500" />}
        
-       <div className="flex items-center gap-4 sm:gap-8">
-          <div className="flex items-center gap-3">
+       <div className="flex items-center gap-8 flex-1">
+          {/* OFFER PART */}
+          <div className="flex items-center gap-4">
              <div className="relative">
-                <BiscuitIcon biscuit={offerB} size="sm" />
-                <div className="absolute -bottom-1 -right-1 bg-slate-800 text-[9px] px-1 rounded border border-slate-700 text-slate-400">OFFER</div>
+                <BiscuitIcon biscuit={offerB} size="md" />
+                <div className="absolute -bottom-2 -right-2 bg-slate-900 text-[10px] px-2 py-0.5 rounded-full border border-slate-700 text-emerald-400 font-bold shadow-lg">GET</div>
              </div>
              <div className="flex flex-col">
-                <span className="text-sm font-bold text-slate-200">{trade.offerQty} {offerB.name}</span>
-                <span className="text-[10px] text-slate-500 uppercase">From {trade.creatorName}</span>
+                <span className="text-2xl font-bold text-white">{trade.offerQty} <span className="text-sm text-slate-400 font-normal">{offerB.name}</span></span>
+                <span className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">From {trade.creatorName}</span>
              </div>
           </div>
           
-          <ArrowRight size={14} className="text-slate-600 shrink-0" />
+          <div className="hidden md:flex items-center justify-center w-12 h-12 rounded-full bg-slate-900 border border-slate-700 shrink-0">
+             <ArrowRight size={20} className="text-slate-500" />
+          </div>
           
-          <div className="flex items-center gap-3">
+          {/* REQUEST PART */}
+          <div className="flex items-center gap-4">
              <div className="relative">
-                <BiscuitIcon biscuit={reqB} size="sm" />
-                <div className="absolute -bottom-1 -right-1 bg-slate-800 text-[9px] px-1 rounded border border-slate-700 text-slate-400">REQ</div>
+                <BiscuitIcon biscuit={reqB} size="md" />
+                <div className="absolute -bottom-2 -right-2 bg-slate-900 text-[10px] px-2 py-0.5 rounded-full border border-slate-700 text-amber-500 font-bold shadow-lg">GIVE</div>
              </div>
              <div className="flex flex-col">
-                <span className="text-sm font-bold text-slate-200">{trade.requestQty} {reqB.name}</span>
-                <span className="text-[10px] text-slate-500 uppercase">From {trade.takerName || 'Partner'}</span>
+                <span className="text-2xl font-bold text-white">{trade.requestQty} <span className="text-sm text-slate-400 font-normal">{reqB.name}</span></span>
+                <span className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">To {trade.takerName || 'Partner'}</span>
              </div>
           </div>
        </div>
 
-       <div className="flex items-center justify-end">
+       <div className="flex items-center justify-end md:min-w-[200px]">
          {isWaitingOnMe ? (
             <button 
               onClick={onConfirm}
-              className="w-full sm:w-auto px-6 py-2 bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold text-xs rounded-lg shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
+              className="w-full md:w-auto px-8 py-4 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-900 font-bold text-sm rounded-xl shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
             >
-              <Check size={16} /> Confirm Receipt
+              <Check size={20} strokeWidth={3} /> Confirm Receipt
             </button>
          ) : (
-            <div className="flex items-center gap-2 text-slate-500 text-xs font-medium px-4 py-2 bg-slate-800 rounded-lg border border-slate-700">
-               <Loader2 size={14} className="animate-spin text-slate-400" /> Waiting for Partner
+            <div className="flex items-center gap-3 text-slate-400 text-sm font-bold px-6 py-4 bg-slate-950 rounded-xl border border-slate-800">
+               <Loader2 size={18} className="animate-spin text-amber-500" /> Waiting for Partner...
             </div>
          )}
        </div>
     </div>
   );
 };
+
+const MyListingCard: React.FC<{
+  trade: P2PTrade;
+  biscuits: Biscuit[];
+  onCancel: () => void;
+  onAcceptBid: (bidId: string) => void;
+}> = ({ trade, biscuits, onCancel, onAcceptBid }) => {
+  const offerB = biscuits.find(b => b.id === trade.offerBiscuitId);
+  const reqB = biscuits.find(b => b.id === trade.requestBiscuitId);
+  const [bids, setBids] = useState<TradeBid[]>([]);
+  const [showBids, setShowBids] = useState(false);
+  
+  // Realtime bids fetch
+  useEffect(() => {
+    if (trade.tradeType === 'AUCTION') {
+      const fetchBids = async () => setBids(await BackendService.getBidsForTrade(trade.id));
+      fetchBids();
+      // Subscribe
+      const channel = supabase.channel(`bids_${trade.id}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_bids', filter: `trade_id=eq.${trade.id}` }, fetchBids)
+        .subscribe();
+      return () => { supabase.removeChannel(channel) };
+    }
+  }, [trade.id, trade.tradeType]);
+
+  if (!offerB) return null;
+
+  return (
+    <div className={clsx(
+       "bg-slate-900/50 border rounded-2xl overflow-hidden transition-all duration-300 group shadow-lg flex flex-col",
+       trade.tradeType === 'AUCTION' ? "border-purple-500/30 hover:border-purple-500/60" : "border-slate-800 hover:border-slate-600"
+    )}>
+      <div className={clsx("p-1 h-1 w-full bg-gradient-to-r transition-all duration-500",
+         trade.tradeType === 'AUCTION' ? "from-purple-900 via-purple-500 to-purple-900" : "from-slate-800 via-blue-900 to-slate-800"
+      )} />
+      
+      <div className="p-5 flex-1 flex flex-col">
+        {/* Header */}
+        <div className="flex justify-between items-start mb-6">
+           <div className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Order Ref</span>
+              <span className="font-mono text-xs text-slate-300 bg-slate-950 px-2 py-1 rounded border border-slate-800">#{trade.id.slice(0, 6)}</span>
+           </div>
+           <div className={clsx("flex items-center gap-2 px-2.5 py-1 rounded-full border", 
+              trade.tradeType === 'AUCTION' ? "bg-purple-500/10 border-purple-500/20" : "bg-blue-500/10 border-blue-500/20"
+           )}>
+              <div className={clsx("w-1.5 h-1.5 rounded-full animate-pulse", trade.tradeType === 'AUCTION' ? "bg-purple-400" : "bg-blue-400")} />
+              <span className={clsx("text-[10px] font-bold uppercase tracking-wide", trade.tradeType === 'AUCTION' ? "text-purple-400" : "text-blue-400")}>
+                {trade.tradeType === 'AUCTION' ? "Live Auction" : "Fixed Price"}
+              </span>
+           </div>
+        </div>
+
+        {/* Content */}
+        <div className="flex items-center justify-between relative mb-6">
+           {/* Left */}
+           <div className="flex items-center gap-3">
+              <div className="relative">
+                 <BiscuitIcon biscuit={offerB} size="md" className="ring-2 ring-slate-800 group-hover:ring-slate-700 transition-all" />
+                 <div className="absolute -bottom-2 right-0 bg-slate-900 text-slate-300 text-[10px] font-bold px-1.5 py-0.5 rounded border border-slate-700 shadow-sm z-10">
+                   x{trade.offerQty}
+                 </div>
+              </div>
+              <div className="flex flex-col">
+                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">You Give</span>
+                 <span className="text-sm font-bold text-white leading-tight max-w-[80px] truncate">{offerB.name}</span>
+              </div>
+           </div>
+
+           {/* Center Arrow */}
+           <div className="flex flex-col items-center justify-center text-slate-700 group-hover:text-slate-500 transition-colors">
+              <ArrowRight size={24} strokeWidth={1.5} />
+           </div>
+
+           {/* Right (Depending on Type) */}
+           {trade.tradeType === 'FIXED' && reqB ? (
+             <div className="flex items-center gap-3 flex-row-reverse text-right">
+                <div className="relative">
+                   <BiscuitIcon biscuit={reqB} size="md" className="ring-2 ring-slate-800 group-hover:ring-slate-700 transition-all" />
+                   <div className="absolute -bottom-2 left-0 bg-slate-900 text-amber-500 text-[10px] font-bold px-1.5 py-0.5 rounded border border-slate-700 shadow-sm z-10">
+                     x{trade.requestQty}
+                   </div>
+                </div>
+                <div className="flex flex-col items-end">
+                   <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">You Get</span>
+                   <span className="text-sm font-bold text-white leading-tight max-w-[80px] truncate">{reqB.name}</span>
+                </div>
+             </div>
+           ) : (
+             <div className="flex flex-col items-end justify-center h-full">
+                <span className="text-3xl font-bold text-white">{bids.length}</span>
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Active Bids</span>
+             </div>
+           )}
+        </div>
+        
+        {/* Auction Bids Section */}
+        {trade.tradeType === 'AUCTION' && (
+           <div className="mb-4">
+              <button onClick={() => setShowBids(!showBids)} className="w-full text-xs text-purple-400 hover:text-purple-300 font-bold uppercase tracking-wider flex items-center justify-between bg-purple-500/10 px-3 py-2 rounded-lg border border-purple-500/20 mb-2">
+                 <span>{showBids ? "Hide Bids" : "View Bids"}</span>
+                 <Gavel size={14} />
+              </button>
+              
+              <AnimatePresence>
+              {showBids && (
+                <MotionDiv initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                   <div className="flex flex-col gap-2 max-h-40 overflow-y-auto custom-scrollbar p-1">
+                      {bids.length === 0 && <div className="text-center text-xs text-slate-500 italic py-2">No bids yet.</div>}
+                      {bids.map(bid => {
+                         const bidBiscuit = biscuits.find(b => b.id === bid.biscuitId);
+                         return (
+                            <div key={bid.id} className="flex justify-between items-center bg-slate-950 p-2 rounded border border-slate-800">
+                               <div className="flex items-center gap-2">
+                                  <span className="text-[10px] bg-slate-800 text-slate-400 px-1 rounded">{bid.bidderName}</span>
+                                  {bidBiscuit && (
+                                     <div className="flex items-center gap-1 text-xs text-white font-bold">
+                                        <span>{bid.qty}x</span>
+                                        <span>{bidBiscuit.name}</span>
+                                     </div>
+                                  )}
+                               </div>
+                               <button onClick={() => onAcceptBid(bid.id)} className="text-[10px] bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-1 rounded font-bold uppercase">Accept</button>
+                            </div>
+                         )
+                      })}
+                   </div>
+                </MotionDiv>
+              )}
+              </AnimatePresence>
+           </div>
+        )}
+
+        {/* Footer Action */}
+        <button 
+          onClick={onCancel}
+          className="w-full py-3 rounded-xl bg-slate-950 border border-slate-800 text-slate-400 text-xs font-bold uppercase tracking-widest hover:bg-red-900/10 hover:text-red-400 hover:border-red-900/30 transition-all flex items-center justify-center gap-2 group/btn mt-auto"
+        >
+          <X size={14} className="group-hover/btn:scale-110 transition-transform" /> Cancel Listing
+        </button>
+      </div>
+    </div>
+  )
+}
 
 const HistoryRow: React.FC<{
   trade: P2PTrade;
@@ -168,10 +401,6 @@ const HistoryRow: React.FC<{
 
   const isCreator = trade.creatorId === userId;
   
-  // Logic: 
-  // If I am Creator: I gave Offer, I got Request
-  // If I am Taker: I gave Request, I got Offer
-  
   const gaveQty = isCreator ? trade.offerQty : trade.requestQty;
   const gaveBiscuit = isCreator ? offerB : reqB;
   
@@ -181,28 +410,30 @@ const HistoryRow: React.FC<{
   const otherName = isCreator ? trade.takerName : trade.creatorName;
 
   return (
-    <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex items-center justify-between hover:border-slate-700 transition-colors">
-      <div className="flex items-center gap-4">
-        <div className="flex flex-col items-center">
-          <span className="text-[10px] font-bold text-slate-500 mb-1">OUT</span>
-          <div className="flex items-center gap-2 text-slate-400">
-             <span className="font-mono font-bold text-red-400">-{gaveQty}</span>
-             <BiscuitIcon biscuit={gaveBiscuit} size="sm" className="scale-75" />
-          </div>
+    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between hover:border-slate-700 transition-colors gap-4">
+      <div className="flex items-center gap-6">
+        <div className="flex items-center gap-3">
+             <div className="flex flex-col items-center gap-1">
+               <span className="text-[10px] font-black text-red-500 uppercase tracking-widest">Sent</span>
+               <BiscuitIcon biscuit={gaveBiscuit} size="sm" />
+             </div>
+             <span className="font-mono font-bold text-xl text-slate-300">-{gaveQty}</span>
         </div>
-        <ArrowRight size={14} className="text-slate-600" />
-        <div className="flex flex-col items-center">
-          <span className="text-[10px] font-bold text-slate-500 mb-1">IN</span>
-          <div className="flex items-center gap-2 text-slate-200">
-             <span className="font-mono font-bold text-emerald-400">+{gotQty}</span>
-             <BiscuitIcon biscuit={gotBiscuit} size="sm" className="scale-75" />
-          </div>
+        
+        <ArrowRight size={16} className="text-slate-700" />
+        
+        <div className="flex items-center gap-3">
+             <span className="font-mono font-bold text-xl text-white">+{gotQty}</span>
+             <div className="flex flex-col items-center gap-1">
+               <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Received</span>
+               <BiscuitIcon biscuit={gotBiscuit} size="sm" />
+             </div>
         </div>
       </div>
 
-      <div className="text-right">
-        <div className="text-xs text-slate-400 font-medium">Traded with <span className="text-slate-200">{otherName}</span></div>
-        <div className="text-[10px] text-slate-600 mt-1">{new Date(trade.createdAt).toLocaleString()}</div>
+      <div className="text-right flex sm:flex-col items-center sm:items-end justify-between border-t sm:border-t-0 border-slate-800 pt-3 sm:pt-0">
+        <div className="text-sm text-slate-300 font-bold">Traded with <span className="text-amber-500">{otherName}</span></div>
+        <div className="text-[10px] text-slate-500 font-mono mt-1">{new Date(trade.createdAt).toLocaleString()}</div>
       </div>
     </div>
   )
@@ -227,6 +458,7 @@ export const Dashboard: React.FC = () => {
 
   // Create Trade Form State
   const [isCreating, setIsCreating] = useState(false);
+  const [createType, setCreateType] = useState<P2PTradeType>('FIXED');
   const [offerBid, setOfferBid] = useState('');
   const [offerQty, setOfferQty] = useState(1);
   const [reqBid, setReqBid] = useState('');
@@ -290,12 +522,15 @@ export const Dashboard: React.FC = () => {
     
     setIsProcessing(true);
     try {
-      const res = await BackendService.createP2PTrade(user.id, offerBid, offerQty, reqBid, reqQty);
+      const res = await BackendService.createP2PTrade(user.id, offerBid, offerQty, reqBid, reqQty, createType);
       if (res.success) {
         notify(res.message, 'success');
         setIsCreating(false);
         setOfferQty(1); setReqQty(1); setOfferBid(''); setReqBid('');
-        // Data updates automatically via Realtime
+        setCreateType('FIXED');
+        // Immediate Update
+        fetchTrades();
+        fetchInventory();
       } else {
         notify(res.message, 'error');
       }
@@ -317,6 +552,8 @@ export const Dashboard: React.FC = () => {
       setIsRestocking(false);
       setRestockQty(10);
       setRestockId('');
+      // Immediate Update
+      fetchInventory();
     } catch(e) {
       notify('Failed to update stash', 'error');
     } finally {
@@ -352,11 +589,13 @@ export const Dashboard: React.FC = () => {
     try {
       const result = await BackendService.createBiscuit(user.id, newBiscuitName, newBiscuitBrand, newBiscuitIcon, newBiscuitColor);
       if (result.success && result.data) {
-        // Optimistic update handled by Realtime for safety
         notify(`${result.data.name} created (+10 packets added)`, 'success');
         setIsCreatingBiscuit(false);
         setNewBiscuitName(''); setNewBiscuitBrand(''); setNewBiscuitIcon('');
         setNewBiscuitColor(BRAND_COLORS[0].class);
+        // Immediate Update
+        fetchBiscuits();
+        fetchInventory();
       } else {
         notify(result.error || 'Failed to create biscuit.', 'error');
       }
@@ -378,6 +617,10 @@ export const Dashboard: React.FC = () => {
         try {
           const res = await BackendService.acceptP2PTrade(tradeId, user.id);
           notify(res.message, res.success ? 'success' : 'error');
+          if (res.success) {
+            fetchTrades();
+            fetchInventory();
+          }
         } finally {
           setIsProcessing(false);
         }
@@ -385,12 +628,55 @@ export const Dashboard: React.FC = () => {
     });
   };
 
+  const handlePlaceBid = (tradeId: string, biscuitId: string, qty: number) => {
+    if (!user) return;
+    setConfirmState({
+      isOpen: true,
+      msg: `Place bid of ${qty} packets? This will reserve them from your inventory until the auction ends.`,
+      onConfirm: async () => {
+        setIsProcessing(true);
+        try {
+          const res = await BackendService.placeBid(tradeId, user.id, biscuitId, qty);
+          notify(res.message, res.success ? 'success' : 'error');
+          if (res.success) fetchInventory();
+        } finally {
+          setIsProcessing(false);
+        }
+      }
+    });
+  };
+
+  const handleAcceptBid = (bidId: string, tradeId: string) => {
+    if (!user) return;
+    setConfirmState({
+      isOpen: true,
+      msg: "Accept this bid? All other bids will be refunded and trade will move to confirmation.",
+      onConfirm: async () => {
+         setIsProcessing(true);
+         try {
+           const res = await BackendService.acceptBid(tradeId, bidId, user.id);
+           notify(res.message, res.success ? 'success' : 'error');
+           if (res.success) {
+              fetchTrades();
+           }
+         } finally {
+           setIsProcessing(false);
+         }
+      }
+    })
+  }
+
   const handleConfirm = async (tradeId: string) => {
     if (!user) return;
     setIsProcessing(true);
     try {
       const res = await BackendService.confirmP2PTrade(tradeId, user.id);
       notify(res.message, res.success ? 'success' : 'error');
+      if (res.success) {
+        fetchTrades();
+        fetchHistory();
+        fetchInventory();
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -400,12 +686,16 @@ export const Dashboard: React.FC = () => {
     if (!user) return;
     setConfirmState({
       isOpen: true,
-      msg: "Cancel this trade offer? Your items will be refunded to your inventory.",
+      msg: "Cancel this listing? Your items (and any bids) will be refunded.",
       onConfirm: async () => {
         setIsProcessing(true);
         try {
           const res = await BackendService.cancelP2PTrade(tradeId, user.id);
           notify(res.message, res.success ? 'success' : 'error');
+          if (res.success) {
+            fetchTrades();
+            fetchInventory();
+          }
         } finally {
           setIsProcessing(false);
         }
@@ -644,18 +934,19 @@ export const Dashboard: React.FC = () => {
         </div>
 
         {/* Inventory Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
           {inventory.map((item) => {
             const b = getBiscuit(item.biscuitId);
             if (!b) return null;
             return (
-              <div key={item.biscuitId} className="bg-slate-900 p-5 rounded-xl border border-slate-800 flex flex-col items-center shadow-lg hover:border-slate-700 transition-all group hover:-translate-y-1 duration-300">
-                <div className="transform group-hover:scale-110 transition-transform duration-300 drop-shadow-lg">
-                  <BiscuitIcon biscuit={b} size="sm" />
+              <div key={item.biscuitId} className="bg-slate-900 p-6 rounded-2xl border border-slate-800 flex flex-col items-center shadow-xl hover:border-slate-600 transition-all group hover:-translate-y-1 duration-300 relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-slate-700 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"/>
+                <div className="transform group-hover:scale-105 transition-transform duration-300 drop-shadow-2xl z-10">
+                  <BiscuitIcon biscuit={b} size="lg" />
                 </div>
-                <div className="mt-4 text-center">
-                  <span className="block font-mono text-2xl font-bold text-slate-100">{item.quantity}</span>
-                  <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mt-1 block">{b.name}</span>
+                <div className="mt-5 text-center z-10">
+                  <span className="block font-mono text-3xl font-bold text-slate-100 tracking-tight">{item.quantity}</span>
+                  <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mt-1 block truncate max-w-[120px]">{b.name}</span>
                 </div>
               </div>
             );
@@ -698,29 +989,46 @@ export const Dashboard: React.FC = () => {
               <MotionButton 
                 initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                 onClick={() => setIsCreating(true)}
-                className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-dashed border-slate-700 hover:border-amber-500/50 rounded-xl font-medium transition-all flex items-center justify-center gap-3 group shadow-sm hover:shadow-md hover:text-amber-500"
+                className="w-full py-6 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-dashed border-slate-700 hover:border-amber-500/50 rounded-xl font-medium transition-all flex items-center justify-center gap-3 group shadow-sm hover:shadow-md hover:text-amber-500"
               >
-                <div className="p-1 bg-slate-800 rounded-md border border-slate-700 group-hover:bg-amber-500 group-hover:text-slate-900 transition-colors">
-                   <Plus size={18} />
+                <div className="p-2 bg-slate-800 rounded-lg border border-slate-700 group-hover:bg-amber-500 group-hover:text-slate-900 transition-colors">
+                   <Plus size={20} />
                 </div>
-                Create New Exchange Offer
+                <span className="text-lg font-bold">Create New Exchange Offer</span>
               </MotionButton>
             ) : (
               <MotionDiv 
                 initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-                className="bg-slate-900 p-6 rounded-xl border border-slate-700 shadow-xl overflow-hidden"
+                className="bg-slate-900 p-8 rounded-xl border border-slate-700 shadow-xl overflow-hidden"
               >
-                <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
-                  <h3 className="font-bold text-white text-sm uppercase tracking-wide flex items-center gap-2">
-                    <RefreshCw size={16} className="text-amber-500"/> New Limit Order
+                <div className="flex justify-between items-center mb-8 border-b border-slate-800 pb-4">
+                  <h3 className="font-bold text-white text-lg uppercase tracking-wide flex items-center gap-2">
+                    <RefreshCw size={20} className="text-amber-500"/> New Listing
                   </h3>
-                  <button onClick={() => setIsCreating(false)} className="text-slate-500 hover:text-slate-300 p-1 hover:bg-slate-800 rounded transition-colors"><X size={18}/></button>
+                  <button onClick={() => setIsCreating(false)} className="text-slate-500 hover:text-slate-300 p-2 hover:bg-slate-800 rounded transition-colors"><X size={20}/></button>
                 </div>
-                <form onSubmit={handleCreateTrade} className="flex flex-col lg:flex-row gap-6 items-start lg:items-end">
-                  <div className="flex-1 space-y-2 w-full">
-                    <label className="text-[10px] text-emerald-500 uppercase font-bold tracking-wider flex items-center gap-2"><ArrowRight className="rotate-180" size={12}/> You Give</label>
-                    <div className="flex gap-3">
-                      <input type="number" min="1" value={offerQty} onChange={e => setOfferQty(parseInt(e.target.value))} className="w-24 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-white focus:border-amber-500 outline-none text-sm font-mono text-center" />
+
+                {/* Trade Type Switcher */}
+                <div className="flex gap-4 mb-6">
+                   <button 
+                    onClick={() => setCreateType('FIXED')}
+                    className={clsx("flex-1 py-3 border rounded-lg font-bold text-sm uppercase flex items-center justify-center gap-2 transition-all", createType === 'FIXED' ? "bg-blue-600 border-blue-500 text-white" : "bg-slate-950 border-slate-700 text-slate-500 hover:border-slate-600")}
+                   >
+                     <RefreshCw size={16} /> Fixed Price
+                   </button>
+                   <button 
+                    onClick={() => setCreateType('AUCTION')}
+                    className={clsx("flex-1 py-3 border rounded-lg font-bold text-sm uppercase flex items-center justify-center gap-2 transition-all", createType === 'AUCTION' ? "bg-purple-600 border-purple-500 text-white" : "bg-slate-950 border-slate-700 text-slate-500 hover:border-slate-600")}
+                   >
+                     <Gavel size={16} /> Auction
+                   </button>
+                </div>
+
+                <form onSubmit={handleCreateTrade} className="flex flex-col xl:flex-row gap-8 items-start xl:items-end">
+                  <div className="flex-1 space-y-3 w-full">
+                    <label className="text-xs text-emerald-500 uppercase font-bold tracking-wider flex items-center gap-2"><ArrowRight className="rotate-180" size={14}/> You Give</label>
+                    <div className="flex gap-4">
+                      <input type="number" min="1" value={offerQty} onChange={e => setOfferQty(parseInt(e.target.value))} className="w-28 bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-amber-500 outline-none text-lg font-mono text-center font-bold" />
                       <div className="flex-1">
                          <CustomSelect value={offerBid} onChange={setOfferBid} options={biscuitOptions} placeholder="Select Biscuit..." />
                       </div>
@@ -728,22 +1036,27 @@ export const Dashboard: React.FC = () => {
                   </div>
                   
                   <div className="flex items-center justify-center self-center pb-2 text-slate-600">
-                    <ArrowRight size={24} className="hidden lg:block"/>
-                    <ArrowRight size={24} className="lg:hidden rotate-90"/>
+                    <ArrowRight size={32} className="hidden xl:block"/>
+                    <ArrowRight size={32} className="xl:hidden rotate-90"/>
                   </div>
                   
-                  <div className="flex-1 space-y-2 w-full">
-                    <label className="text-[10px] text-amber-500 uppercase font-bold tracking-wider flex items-center gap-2"><ArrowRight size={12}/> You Get</label>
-                    <div className="flex gap-3">
-                      <input type="number" min="1" value={reqQty} onChange={e => setReqQty(parseInt(e.target.value))} className="w-24 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-white focus:border-amber-500 outline-none text-sm font-mono text-center" />
+                  <div className="flex-1 space-y-3 w-full">
+                    <label className={clsx("text-xs uppercase font-bold tracking-wider flex items-center gap-2", createType === 'FIXED' ? "text-amber-500" : "text-purple-500")}>
+                       <ArrowRight size={14}/> {createType === 'FIXED' ? "You Get" : "Preferred (Optional)"}
+                    </label>
+                    <div className="flex gap-4">
+                      <input type="number" min="1" value={reqQty} onChange={e => setReqQty(parseInt(e.target.value))} className="w-28 bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-amber-500 outline-none text-lg font-mono text-center font-bold" />
                       <div className="flex-1">
                          <CustomSelect value={reqBid} onChange={setReqBid} options={biscuitOptions} placeholder="Select Biscuit..." />
                       </div>
                     </div>
                   </div>
 
-                  <button type="submit" className="w-full lg:w-auto px-8 py-3 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded-lg font-bold text-sm shadow-lg shadow-orange-900/20 transition-all active:scale-[0.98]">
-                    Post Trade
+                  <button type="submit" className={clsx(
+                     "w-full xl:w-auto px-10 py-4 text-white rounded-lg font-bold text-sm uppercase tracking-wider shadow-lg transition-all active:scale-[0.98]",
+                     createType === 'FIXED' ? "bg-gradient-to-r from-blue-600 to-cyan-600 shadow-blue-900/20" : "bg-gradient-to-r from-purple-600 to-pink-600 shadow-purple-900/20"
+                  )}>
+                    {createType === 'FIXED' ? "Post Trade" : "Start Auction"}
                   </button>
                 </form>
               </MotionDiv>
@@ -753,40 +1066,52 @@ export const Dashboard: React.FC = () => {
           )}
 
           {activeTab === 'market' && (
-            <div className="space-y-4">
+            <div className="space-y-6">
                {openTrades.length === 0 ? (
                  <div className="text-center py-24 bg-slate-900/30 rounded-2xl border border-slate-800/50 border-dashed">
-                   <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4">
-                     <ShoppingBag size={24} className="text-slate-600" />
+                   <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-6">
+                     <ShoppingBag size={32} className="text-slate-600" />
                    </div>
-                   <p className="text-slate-400 text-sm font-bold">The market is quiet.</p>
-                   <p className="text-slate-600 text-xs mt-2">Be the first to post a trade offer!</p>
+                   <p className="text-slate-400 text-lg font-bold">The market is quiet.</p>
+                   <p className="text-slate-600 text-sm mt-2">Be the first to post a trade offer!</p>
                  </div>
                ) : (
-                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                   {openTrades.map(trade => (
-                     <MarketTradeCard 
-                        key={trade.id} 
-                        trade={trade} 
-                        biscuits={biscuits} 
-                        onAccept={() => handleAccept(trade.id)} 
-                        userBalance={inventory.find(i => i.biscuitId === trade.requestBiscuitId)?.quantity || 0}
-                      />
-                   ))}
+                 <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-8">
+                   {openTrades.map(trade => {
+                     if (trade.tradeType === 'AUCTION') {
+                        return (
+                          <AuctionTradeCard 
+                             key={trade.id}
+                             trade={trade}
+                             biscuits={biscuits}
+                             onBid={(bidId, qty) => handlePlaceBid(trade.id, bidId, qty)}
+                          />
+                        )
+                     }
+                     return (
+                       <MarketTradeCard 
+                          key={trade.id} 
+                          trade={trade} 
+                          biscuits={biscuits} 
+                          onAccept={() => handleAccept(trade.id)} 
+                          userBalance={inventory.find(i => i.biscuitId === trade.requestBiscuitId)?.quantity || 0}
+                        />
+                     )
+                   })}
                  </div>
                )}
             </div>
           )}
 
           {activeTab === 'my-trades' && (
-            <div className="space-y-10">
+            <div className="space-y-12">
               {/* ACTION REQUIRED */}
               {(myActionRequired.length > 0 || myPendingOthers.length > 0) && (
-                <div className="space-y-4">
-                   <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2 border-b border-slate-800 pb-3">
-                     <AlertCircle size={14} className="text-amber-500"/> Action Required
+                <div className="space-y-6">
+                   <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2 border-b border-slate-800 pb-4">
+                     <AlertCircle size={16} className="text-amber-500"/> Action Required
                    </h3>
-                   <div className="grid gap-4">
+                   <div className="grid gap-6">
                     {myActionRequired.map(trade => (
                         <PendingTradeRow key={trade.id} trade={trade} biscuits={biscuits} onConfirm={() => handleConfirm(trade.id)} isWaitingOnMe={true} />
                     ))}
@@ -798,53 +1123,35 @@ export const Dashboard: React.FC = () => {
               )}
 
               {/* MY LISTINGS */}
-              <div className="space-y-4">
-                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-800 pb-3">My Open Orders</h3>
+              <div className="space-y-6">
+                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-800 pb-4">My Open Orders</h3>
                  {myListings.length === 0 && (
                     <div className="text-slate-600 text-sm italic px-4">No active orders posted.</div>
                  )}
-                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                 {myListings.map(trade => {
-                    const offerB = getBiscuit(trade.offerBiscuitId);
-                    const reqB = getBiscuit(trade.requestBiscuitId);
-                    if(!offerB || !reqB) return null;
-
-                    return (
-                    <div key={trade.id} className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex justify-between items-center hover:border-slate-700 transition-colors shadow-sm">
-                      <div className="flex items-center gap-4">
-                         <div className="flex items-center gap-2">
-                            <span className="font-bold text-emerald-400 font-mono text-lg">{trade.offerQty}</span>
-                            <BiscuitIcon biscuit={offerB} size="sm" />
-                         </div>
-                         <ArrowRight size={14} className="text-slate-600" />
-                         <div className="flex items-center gap-2">
-                            <span className="font-bold text-amber-500 font-mono text-lg">{trade.requestQty}</span>
-                            <BiscuitIcon biscuit={reqB} size="sm" />
-                         </div>
-                      </div>
-                      <button 
-                        onClick={() => handleCancel(trade.id)} 
-                        className="text-slate-500 hover:text-red-400 hover:bg-red-500/10 p-2 rounded-lg transition-all"
-                        title="Cancel Trade"
-                      >
-                        <X size={18} />
-                      </button>
-                    </div>
-                 )})}
+                 <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-6">
+                 {myListings.map(trade => (
+                    <MyListingCard 
+                      key={trade.id} 
+                      trade={trade} 
+                      biscuits={biscuits} 
+                      onCancel={() => handleCancel(trade.id)}
+                      onAcceptBid={(bidId) => handleAcceptBid(bidId, trade.id)} 
+                    />
+                 ))}
                  </div>
               </div>
             </div>
           )}
 
           {activeTab === 'history' && (
-             <div className="space-y-4">
-               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-800 pb-3">Completed Exchanges</h3>
+             <div className="space-y-6">
+               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-800 pb-4">Completed Exchanges</h3>
                {history.length === 0 ? (
                  <div className="text-slate-500 text-sm italic px-4 py-8 text-center bg-slate-900/30 rounded-xl border border-slate-800 border-dashed">
                     No completed trades yet. Start swapping!
                  </div>
                ) : (
-                 <div className="grid gap-3">
+                 <div className="grid gap-4">
                    {history.map(trade => (
                      <HistoryRow key={trade.id} trade={trade} biscuits={biscuits} userId={user?.id || ''} />
                    ))}

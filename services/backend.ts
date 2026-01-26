@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { User, Biscuit, ExchangeRule, InventoryItem, TradeLog, TradeResult, P2PTrade } from '../types';
+import { User, Biscuit, ExchangeRule, InventoryItem, TradeLog, TradeResult, P2PTrade, P2PTradeType, TradeBid } from '../types';
 
 // CONFIG
 const SUPABASE_URL = 'https://ggwhjljqmxvwjfelfgxz.supabase.co';
@@ -439,6 +439,7 @@ export const BackendService = {
       requestBiscuitId: t.request_biscuit_id,
       requestQty: t.request_qty,
       status: t.status,
+      tradeType: t.trade_type || 'FIXED', // Default for legacy
       creatorConfirmed: t.creator_confirmed,
       takerConfirmed: t.taker_confirmed,
       createdAt: new Date(t.created_at).getTime()
@@ -469,13 +470,14 @@ export const BackendService = {
       requestBiscuitId: t.request_biscuit_id,
       requestQty: t.request_qty,
       status: t.status,
+      tradeType: t.trade_type || 'FIXED',
       creatorConfirmed: t.creator_confirmed,
       takerConfirmed: t.taker_confirmed,
       createdAt: new Date(t.created_at).getTime()
     }));
   },
 
-  createP2PTrade: async (userId: string, offerBiscuitId: string, offerQty: number, reqBiscuitId: string, reqQty: number): Promise<TradeResult> => {
+  createP2PTrade: async (userId: string, offerBiscuitId: string, offerQty: number, reqBiscuitId: string, reqQty: number, tradeType: P2PTradeType = 'FIXED'): Promise<TradeResult> => {
     const user = await BackendService.getUserById(userId);
     if (!user) return { success: false, message: 'User not found' };
 
@@ -490,6 +492,7 @@ export const BackendService = {
       request_biscuit_id: reqBiscuitId,
       request_qty: reqQty,
       status: 'OPEN',
+      trade_type: tradeType,
       creator_confirmed: false,
       taker_confirmed: false
     });
@@ -499,7 +502,84 @@ export const BackendService = {
       await BackendService.adjustInventory(userId, offerBiscuitId, offerQty);
       return { success: false, message: 'Database error while creating trade.' };
     }
-    return { success: true, message: 'Trade Posted!' };
+    return { success: true, message: tradeType === 'AUCTION' ? 'Auction Started!' : 'Trade Posted!' };
+  },
+
+  // --- BIDDING SYSTEM ---
+
+  placeBid: async (tradeId: string, bidderId: string, biscuitId: string, qty: number): Promise<TradeResult> => {
+    const user = await BackendService.getUserById(bidderId);
+    if (!user) return { success: false, message: 'User not found' };
+
+    // 1. Deduct Inventory (Commitment)
+    const success = await BackendService.adjustInventory(bidderId, biscuitId, -qty);
+    if (!success) return { success: false, message: 'Insufficient biscuits to place this bid.' };
+
+    // 2. Insert Bid
+    const { error } = await supabase.from('trade_bids').insert({
+      trade_id: tradeId,
+      bidder_id: bidderId,
+      bidder_name: user.name,
+      biscuit_id: biscuitId,
+      qty: qty
+    });
+
+    if (error) {
+      // Refund on failure
+      await BackendService.adjustInventory(bidderId, biscuitId, qty);
+      return { success: false, message: 'Failed to place bid.' };
+    }
+
+    return { success: true, message: 'Bid Placed!' };
+  },
+
+  getBidsForTrade: async (tradeId: string): Promise<TradeBid[]> => {
+    const { data } = await supabase.from('trade_bids').select('*').eq('trade_id', tradeId).order('created_at', { ascending: false });
+    return (data || []).map((b: any) => ({
+      id: b.id,
+      tradeId: b.trade_id,
+      bidderId: b.bidder_id,
+      bidderName: b.bidder_name,
+      biscuitId: b.biscuit_id,
+      qty: b.qty,
+      createdAt: new Date(b.created_at).getTime()
+    }));
+  },
+
+  acceptBid: async (tradeId: string, bidId: string, creatorId: string): Promise<TradeResult> => {
+    // 1. Fetch Bid and Trade details
+    const { data: bid } = await supabase.from('trade_bids').select('*').eq('id', bidId).single();
+    const { data: trade } = await supabase.from('p2p_trades').select('*').eq('id', tradeId).single();
+
+    if (!bid || !trade) return { success: false, message: 'Bid or Trade not found.' };
+    if (trade.creator_id !== creatorId) return { success: false, message: 'Not authorized.' };
+
+    // 2. Convert Trade to Pending
+    const { error: updateError } = await supabase.from('p2p_trades').update({
+      status: 'PENDING',
+      taker_id: bid.bidder_id,
+      taker_name: bid.bidder_name,
+      request_biscuit_id: bid.biscuit_id, // Lock in the bid item
+      request_qty: bid.qty
+    }).eq('id', tradeId);
+
+    if (updateError) return { success: false, message: 'Failed to update trade status.' };
+
+    // 3. Refund all OTHER bidders
+    const { data: allBids } = await supabase.from('trade_bids').select('*').eq('trade_id', tradeId);
+    if (allBids) {
+      for (const b of allBids) {
+        if (b.id !== bidId) {
+          // Refund
+          await BackendService.adjustInventory(b.bidder_id, b.biscuit_id, b.qty);
+        }
+      }
+    }
+
+    // 4. Cleanup bids for this trade
+    await supabase.from('trade_bids').delete().eq('trade_id', tradeId);
+
+    return { success: true, message: 'Bid Accepted! Trade is now Pending confirmation.' };
   },
 
   acceptP2PTrade: async (tradeId: string, takerId: string): Promise<TradeResult> => {
@@ -571,6 +651,16 @@ export const BackendService = {
 
     // Refund Creator
     await BackendService.adjustInventory(userId, trade.offer_biscuit_id, trade.offer_qty);
+    
+    // Also Refund any active bids
+    const { data: bids } = await supabase.from('trade_bids').select('*').eq('trade_id', tradeId);
+    if (bids) {
+      for (const b of bids) {
+        await BackendService.adjustInventory(b.bidder_id, b.biscuit_id, b.qty);
+      }
+    }
+    // Delete bids
+    await supabase.from('trade_bids').delete().eq('trade_id', tradeId);
     
     await supabase.from('p2p_trades').update({ status: 'CANCELLED' }).eq('id', tradeId);
     return { success: true, message: 'Trade cancelled, items refunded.' };

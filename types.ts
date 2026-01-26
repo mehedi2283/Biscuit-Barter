@@ -34,6 +34,7 @@ export interface ExchangeRule {
 
 // P2P Trade Models
 export type P2PTradeStatus = 'OPEN' | 'PENDING' | 'COMPLETED' | 'CANCELLED';
+export type P2PTradeType = 'FIXED' | 'AUCTION';
 
 export interface P2PTrade {
   id: string;
@@ -45,14 +46,26 @@ export interface P2PTrade {
   offerBiscuitId: string;
   offerQty: number;
   
+  // For Fixed: Exact request. For Auction: Preferred/Display only.
   requestBiscuitId: string;
   requestQty: number;
   
   status: P2PTradeStatus;
+  tradeType: P2PTradeType; // New Field
   
   creatorConfirmed: boolean;
   takerConfirmed: boolean;
   
+  createdAt: number;
+}
+
+export interface TradeBid {
+  id: string;
+  tradeId: string;
+  bidderId: string;
+  bidderName: string;
+  biscuitId: string;
+  qty: number;
   createdAt: number;
 }
 

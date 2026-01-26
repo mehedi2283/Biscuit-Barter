@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { BackendService, supabase } from '../services/backend';
-import { Biscuit, ExchangeRule, P2PTrade, User } from '../types';
+import { Biscuit, ExchangeRule, P2PTrade, User, InventoryItem } from '../types';
 import { CustomSelect } from '../components/CustomSelect';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { Modal } from '../components/Modal';
@@ -30,7 +30,7 @@ export const AdminDashboard: React.FC = () => {
   
   // Rule / Inventory State
   const [selectedUser, setSelectedUser] = useState<string>('');
-  const [userInventory, setUserInventory] = useState<any[]>([]);
+  const [userInventory, setUserInventory] = useState<InventoryItem[]>([]);
 
   // Biscuit Edit State
   const [editingBiscuit, setEditingBiscuit] = useState<Biscuit | null>(null);
@@ -46,8 +46,22 @@ export const AdminDashboard: React.FC = () => {
   // Modals
   const [confirmState, setConfirmState] = useState<{ isOpen: boolean, msg: string, onConfirm: () => void, isDestructive?: boolean }>({ isOpen: false, msg: '', onConfirm: () => {} });
 
+  // Initial Data Load & Realtime
   useEffect(() => {
-    loadData();
+    const fetchData = async () => {
+      // Parallel fetch for speed on mount
+      const [r, b, u, t] = await Promise.all([
+        BackendService.getRules(),
+        BackendService.getBiscuits(),
+        BackendService.getUsers(),
+        BackendService.getAllTrades()
+      ]);
+      setRules(r);
+      setBiscuits(b);
+      setUsers(u);
+      setAllTrades(t);
+    };
+    fetchData();
 
     // REALTIME SUBSCRIPTION FOR ADMIN
     // Listens to changes in all key tables to update UI instantly without reload
@@ -57,7 +71,7 @@ export const AdminDashboard: React.FC = () => {
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'biscuits' }, () => {
           BackendService.getBiscuits().then(setBiscuits);
-          // Refresh rules/trades too as they might be cascade deleted
+          // Refresh rules/trades too as they might be cascade deleted or updated
           BackendService.getRules().then(setRules);
           BackendService.getAllTrades().then(setAllTrades);
       })
@@ -72,6 +86,22 @@ export const AdminDashboard: React.FC = () => {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
+  // Fetch data specific to the active tab when switching
+  // This ensures that even if realtime missed an event, the user sees fresh data upon navigation
+  useEffect(() => {
+    const refreshTab = async () => {
+      if (activeTab === 'users') setUsers(await BackendService.getUsers());
+      if (activeTab === 'biscuits') setBiscuits(await BackendService.getBiscuits());
+      if (activeTab === 'trades') setAllTrades(await BackendService.getAllTrades());
+      if (activeTab === 'rules') {
+        const [r, b] = await Promise.all([BackendService.getRules(), BackendService.getBiscuits()]);
+        setRules(r);
+        setBiscuits(b);
+      }
+    };
+    refreshTab();
+  }, [activeTab]);
+
   useEffect(() => {
     if (selectedUser) {
       loadUserInventory(selectedUser);
@@ -84,21 +114,10 @@ export const AdminDashboard: React.FC = () => {
         .subscribe();
         
       return () => { supabase.removeChannel(invChannel); };
+    } else {
+      setUserInventory([]);
     }
   }, [selectedUser]);
-
-  const loadData = async () => {
-    const [r, b, u, t] = await Promise.all([
-      BackendService.getRules(),
-      BackendService.getBiscuits(),
-      BackendService.getUsers(),
-      BackendService.getAllTrades()
-    ]);
-    setRules(r);
-    setBiscuits(b);
-    setUsers(u);
-    setAllTrades(t);
-  };
 
   const loadUserInventory = async (userId: string) => {
     const inv = await BackendService.getUserInventory(userId);
@@ -113,8 +132,11 @@ export const AdminDashboard: React.FC = () => {
       msg: user.isFrozen ? `Unfreeze ${user.name}? They will be able to trade again.` : `Freeze ${user.name}? They will be unable to login or trade.`,
       isDestructive: !user.isFrozen,
       onConfirm: async () => {
+        // Optimistic Update
+        setUsers(prev => prev.map(u => u.id === user.id ? { ...u, isFrozen: !user.isFrozen } : u));
         await BackendService.toggleUserFreeze(user.id, user.isFrozen);
-        // loadData called by realtime
+        // Background refresh to confirm
+        BackendService.getUsers().then(setUsers);
       }
     });
   };
@@ -125,6 +147,8 @@ export const AdminDashboard: React.FC = () => {
       msg: `Permanently delete ${user.name}? This removes their inventory and trade history. This cannot be undone.`,
       isDestructive: true,
       onConfirm: async () => {
+        // Optimistic Update
+        setUsers(prev => prev.filter(u => u.id !== user.id));
         await BackendService.deleteUser(user.id);
       }
     });
@@ -148,6 +172,11 @@ export const AdminDashboard: React.FC = () => {
         const success = await BackendService.deleteBiscuit(b.id);
         if (success) {
            if (editingBiscuit?.id === b.id) setEditingBiscuit(null);
+           // Optimistic Update
+           setBiscuits(prev => prev.filter(i => i.id !== b.id));
+           // Refresh dependencies
+           BackendService.getRules().then(setRules);
+           BackendService.getAllTrades().then(setAllTrades);
         } else {
            alert("Failed to delete biscuit. Check console for details.");
         }
@@ -160,13 +189,20 @@ export const AdminDashboard: React.FC = () => {
     e.preventDefault();
     if (!editingBiscuit) return;
     
+    // Create optimistic object
+    const updatedBiscuit = { ...editingBiscuit, name: editName, brand: editBrand, color: editColor, icon: editIcon };
+    setBiscuits(prev => prev.map(b => b.id === editingBiscuit.id ? updatedBiscuit : b));
+    setEditingBiscuit(null);
+
     await BackendService.updateBiscuit(editingBiscuit.id, {
       name: editName,
       brand: editBrand,
       color: editColor,
       icon: editIcon
     });
-    setEditingBiscuit(null);
+    
+    // Confirm with server
+    BackendService.getBiscuits().then(setBiscuits);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -181,7 +217,10 @@ export const AdminDashboard: React.FC = () => {
   };
 
   const toggleRule = async (rule: ExchangeRule) => {
-    await BackendService.saveRule({ ...rule, isActive: !rule.isActive });
+    // Optimistic
+    const updated = { ...rule, isActive: !rule.isActive };
+    setRules(prev => prev.map(r => r.id === rule.id ? updated : r));
+    await BackendService.saveRule(updated);
   };
 
   const deleteRule = (id: string) => {
@@ -190,6 +229,7 @@ export const AdminDashboard: React.FC = () => {
       msg: "Permanently delete this trade rule?",
       isDestructive: true,
       onConfirm: async () => {
+        setRules(prev => prev.filter(r => r.id !== id));
         await BackendService.deleteRule(id);
       }
     });
@@ -202,14 +242,19 @@ export const AdminDashboard: React.FC = () => {
     }
 
     const newRule: ExchangeRule = {
-      id: Date.now().toString(), // Temp ID, backend will strip this to allow DB gen
+      id: Date.now().toString(), // Temp ID
       fromBiscuitId: biscuits[0].id,
       toBiscuitId: biscuits[1].id,
       fromQty: 1,
       toQty: 1,
       isActive: false
     };
+    
+    // Add optimistic (with temp ID)
+    setRules(prev => [...prev, newRule]);
     await BackendService.saveRule(newRule);
+    // Refresh to get real ID
+    BackendService.getRules().then(setRules);
   };
 
   const updateRuleValue = async (id: string, field: keyof ExchangeRule, value: any) => {
@@ -222,12 +267,16 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  const handleInventoryChange = async (biscuitId: string, newVal: string) => {
-    if (!selectedUser) return;
-    const qty = parseInt(newVal);
+  const handleInventoryChange = (biscuitId: string, val: string) => {
+    const qty = parseInt(val);
     if (!isNaN(qty) && qty >= 0) {
-      await BackendService.updateUserInventory(selectedUser, biscuitId, qty);
+      setUserInventory(prev => prev.map(i => i.biscuitId === biscuitId ? { ...i, quantity: qty } : i));
     }
+  };
+
+  const commitInventoryChange = async (biscuitId: string, qty: number) => {
+    if (!selectedUser) return;
+    await BackendService.updateUserInventory(selectedUser, biscuitId, qty);
   };
 
   const getBiscuitName = (id: string) => biscuits.find(b => b.id === id)?.name || id;
@@ -561,15 +610,16 @@ export const AdminDashboard: React.FC = () => {
                    {selectedUser ? (
                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 bg-slate-950 p-6 rounded-xl border border-slate-800">
                        {userInventory.map(item => (
-                         <div key={item.biscuitId} className="flex flex-col gap-2 p-3 bg-slate-900 rounded-lg border border-slate-800">
+                         <div key={`${selectedUser}-${item.biscuitId}`} className="flex flex-col gap-2 p-3 bg-slate-900 rounded-lg border border-slate-800">
                            <label className="text-[10px] text-slate-400 font-bold uppercase truncate tracking-wider">
                              {getBiscuitName(item.biscuitId)}
                            </label>
                            <input 
                              type="number"
                              min="0"
-                             defaultValue={item.quantity}
-                             onBlur={(e) => handleInventoryChange(item.biscuitId, e.target.value)}
+                             value={item.quantity}
+                             onChange={(e) => handleInventoryChange(item.biscuitId, e.target.value)}
+                             onBlur={(e) => commitInventoryChange(item.biscuitId, parseInt(e.target.value))}
                              className="bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-white focus:border-blue-500 outline-none w-full text-lg font-mono font-bold"
                            />
                          </div>
