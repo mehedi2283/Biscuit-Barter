@@ -301,10 +301,6 @@ export const BackendService = {
       if (result) {
         updates.icon = result.url;
         deleteHash = result.deleteHash;
-        
-        // If we are replacing an existing image, try to delete the old one
-        // Note: Ideally we would fetch the old record first to get the old deleteHash, 
-        // but for now we prioritize the new upload.
       }
     }
 
@@ -348,9 +344,6 @@ export const BackendService = {
 
       if (error) throw error;
 
-      // REMOVED: Automatic 10 inventory grant. New biscuits start at 0.
-      // if (data) await BackendService.updateUserInventory(userId, data.id, 10);
-      
       const newBiscuit: Biscuit = {
         id: data.id,
         name: data.name,
@@ -410,8 +403,6 @@ export const BackendService = {
   },
 
   saveRule: async (rule: ExchangeRule) => {
-    // Logic: If ID is temporary (from Date.now(), no hyphens), we insert.
-    // If ID is a UUID (has hyphens), we update.
     const isTempId = !rule.id.includes('-');
 
     const payload: any = {
@@ -422,8 +413,6 @@ export const BackendService = {
       is_active: rule.isActive
     };
     
-    // Only attach ID if it's a real UUID. 
-    // If it's temp, we omit it so Supabase generates a new UUID.
     if (!isTempId) {
        payload.id = rule.id;
     }
@@ -451,7 +440,8 @@ export const BackendService = {
       requestBiscuitId: t.request_biscuit_id,
       requestQty: t.request_qty,
       status: t.status,
-      tradeType: t.trade_type || 'FIXED', // Default for legacy
+      tradeType: t.trade_type || 'FIXED', 
+      isAny: t.is_any, // Map DB column to Type
       creatorConfirmed: t.creator_confirmed,
       takerConfirmed: t.taker_confirmed,
       createdAt: new Date(t.created_at).getTime()
@@ -459,7 +449,6 @@ export const BackendService = {
   },
 
   getAllTrades: async (): Promise<P2PTrade[]> => {
-    // Admin function to see everything
     return BackendService.getP2PTrades();
   },
 
@@ -483,20 +472,21 @@ export const BackendService = {
       requestQty: t.request_qty,
       status: t.status,
       tradeType: t.trade_type || 'FIXED',
+      isAny: t.is_any,
       creatorConfirmed: t.creator_confirmed,
       takerConfirmed: t.taker_confirmed,
       createdAt: new Date(t.created_at).getTime()
     }));
   },
 
-  createP2PTrade: async (userId: string, offerBiscuitId: string, offerQty: number, reqBiscuitId: string, reqQty: number, tradeType: P2PTradeType = 'FIXED'): Promise<TradeResult> => {
+  createP2PTrade: async (userId: string, offerBiscuitId: string, offerQty: number, reqBiscuitId: string, reqQty: number, tradeType: P2PTradeType = 'FIXED', isAny: boolean = false): Promise<TradeResult> => {
     const user = await BackendService.getUserById(userId);
     if (!user) return { success: false, message: 'User not found' };
 
     const success = await BackendService.adjustInventory(userId, offerBiscuitId, -offerQty);
     if (!success) return { success: false, message: 'Insufficient biscuits to post this trade.' };
 
-    const { error } = await supabase.from('p2p_trades').insert({
+    const payload: any = {
       creator_id: userId,
       creator_name: user.name,
       offer_biscuit_id: offerBiscuitId,
@@ -507,12 +497,27 @@ export const BackendService = {
       trade_type: tradeType,
       creator_confirmed: false,
       taker_confirmed: false
-    });
+    };
+
+    // Only add is_any if true to avoid schema cache errors on older DBs for standard trades
+    if (isAny) {
+      payload.is_any = true;
+    }
+
+    const { error } = await supabase.from('p2p_trades').insert(payload);
 
     if (error) {
-      // Refund if trade creation fails
+      console.error("CREATE TRADE DB ERROR:", error);
+      
+      // Attempt Refund
       await BackendService.adjustInventory(userId, offerBiscuitId, offerQty);
-      return { success: false, message: 'Database error while creating trade.' };
+      
+      // PGRST204 is 'Could not find the column'
+      // 42703 is 'undefined_column'
+      if (error.code === '42703' || error.code === 'PGRST204' || error.message?.includes('is_any')) {
+         return { success: false, message: 'System Sync Error: Please refresh the Database Schema Cache in Supabase settings to enable "Any" trades.' };
+      }
+      return { success: false, message: `Database error: ${error.message}` };
     }
     return { success: true, message: tradeType === 'AUCTION' ? 'Auction Started!' : 'Trade Posted!' };
   },
@@ -571,8 +576,9 @@ export const BackendService = {
       status: 'PENDING',
       taker_id: bid.bidder_id,
       taker_name: bid.bidder_name,
-      request_biscuit_id: bid.biscuit_id, // Lock in the bid item
-      request_qty: bid.qty
+      request_biscuit_id: bid.biscuit_id, // Lock in the bid item as the final request
+      request_qty: bid.qty,
+      is_any: false // No longer "Any" once accepted
     }).eq('id', tradeId);
 
     if (updateError) return { success: false, message: 'Failed to update trade status.' };

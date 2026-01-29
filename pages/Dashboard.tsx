@@ -7,7 +7,7 @@ import { TradeCard } from '../components/TradeCard';
 import { Modal } from '../components/Modal';
 import { CustomSelect } from '../components/CustomSelect';
 import { ConfirmModal } from '../components/ConfirmModal';
-import { Package, Plus, Minus, RefreshCcw, ShoppingBag, History, ArrowRight, Gavel, Trash2, CheckCircle, Loader2, Cookie, Upload, RefreshCw } from 'lucide-react';
+import { Package, Plus, Minus, RefreshCcw, ShoppingBag, History, ArrowRight, Gavel, Trash2, CheckCircle, Loader2, Cookie, Upload, RefreshCw, Calendar, User, Clock } from 'lucide-react';
 import clsx from 'clsx';
 import { motion } from 'framer-motion';
 
@@ -103,6 +103,9 @@ export const Dashboard: React.FC = () => {
   const getQty = (id: string) => inventory.find(i => i.biscuitId === id)?.quantity || 0;
   const biscuitOptions = biscuits.map(b => ({ value: b.id, label: b.name, icon: b.icon }));
   
+  // Validation Helper
+  const maxOfferAvailable = offerId ? getQty(offerId) : 0;
+
   // Handlers
   const handleRestock = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -148,18 +151,29 @@ export const Dashboard: React.FC = () => {
     e.preventDefault();
     if (!user || !offerId) return;
 
-    // Handle "Any" logic for auction: if reqId is 'any', use first biscuit as placeholder or handle in backend
-    // Since DB requires NOT NULL, we use the first biscuit or the offer biscuit as a placeholder if 'any' is selected.
-    // In a real app, we'd change schema to allow NULL request_biscuit_id
-    let finalReqId = reqId;
-    if (tradeType === 'AUCTION' && reqId === 'any') {
-        // Use offerId as placeholder if "Any" is selected to satisfy DB constraint
-        finalReqId = biscuits[0]?.id || offerId; 
+    // Validate again at submission
+    if (offerQty > maxOfferAvailable) {
+        alert(`You only have ${maxOfferAvailable} of this item.`);
+        return;
     }
 
-    if (!finalReqId) return;
+    let finalReqId = reqId;
+    let isAny = false;
 
-    const res = await BackendService.createP2PTrade(user.id, offerId, offerQty, finalReqId, reqQty, tradeType);
+    // Detect "Any" choice
+    if (tradeType === 'AUCTION' && reqId === 'any') {
+        isAny = true;
+        // Use offerId as placeholder to satisfy DB constraint, but flag it as ANY
+        // If biscuits array is somehow empty, fallback to offerId
+        finalReqId = biscuits.length > 0 ? biscuits[0].id : offerId; 
+    }
+
+    if (!finalReqId) {
+        alert("Please select a valid item to request or enable 'Surprise Me'");
+        return;
+    }
+
+    const res = await BackendService.createP2PTrade(user.id, offerId, offerQty, finalReqId, reqQty, tradeType, isAny);
     if (res.success) {
       setIsCreatingTrade(false);
       setOfferQty(1);
@@ -215,7 +229,7 @@ export const Dashboard: React.FC = () => {
              ]);
              setInventory(freshInv);
              setP2PTrades(freshTrades);
-        }
+         }
       }
     });
   };
@@ -265,7 +279,8 @@ export const Dashboard: React.FC = () => {
 
   // Derived Lists
   const activeP2P = p2pTrades.filter(t => t.status === 'OPEN' && t.creatorId !== user?.id);
-  const myActiveTrades = p2pTrades.filter(t => (t.creatorId === user?.id || t.takerId === user?.id) && t.status !== 'CANCELLED');
+  // Show ALL trades involving the user in history, including Cancelled
+  const myHistoryTrades = p2pTrades.filter(t => t.creatorId === user?.id || t.takerId === user?.id);
 
   // Options for Auction (Include "Any")
   const auctionRequestOptions = [
@@ -285,46 +300,46 @@ export const Dashboard: React.FC = () => {
 
       {/* Header & Inventory Strip */}
       <section>
-        <div className="flex justify-between items-end mb-4">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 gap-4">
            <div>
-             <h2 className="text-2xl font-bold text-white tracking-tight">Trading Floor</h2>
-             <p className="text-slate-500 text-sm">Real-time biscuit exchange.</p>
+             <h2 className="text-2xl md:text-4xl font-bold text-white tracking-tight">Trading Floor</h2>
+             <p className="text-slate-500 text-sm md:text-base mt-1">Real-time biscuit exchange.</p>
            </div>
-           <div className="flex gap-2">
+           <div className="flex gap-3 w-full md:w-auto">
              <button 
                 onClick={openCreateBiscuit}
-                className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-lg text-xs font-bold transition-colors border border-slate-700"
+                className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 px-5 py-3 md:py-3.5 rounded-xl text-xs md:text-sm font-bold transition-colors border border-slate-700 shadow-sm"
               >
-                <Plus size={16} /> Add New Item
+                <Plus size={18} /> Add Item
              </button>
              <button 
                onClick={() => setIsRestocking(true)}
-               className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-lg text-xs font-bold transition-colors border border-slate-700"
+               className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 px-5 py-3 md:py-3.5 rounded-xl text-xs md:text-sm font-bold transition-colors border border-slate-700 shadow-sm"
              >
-               <Package size={16} /> Manage Stash
+               <Package size={18} /> Manage Stash
              </button>
            </div>
         </div>
 
-        {/* Inventory Scroll */}
-        <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
+        {/* Inventory Scroll - Scaled Up for Desktop */}
+        <div className="flex gap-4 overflow-x-auto pb-6 custom-scrollbar">
           {biscuits.map(b => {
              const qty = getQty(b.id);
              return (
-               <div key={b.id} className={clsx("flex-shrink-0 bg-slate-900 border rounded-xl p-3 w-32 flex flex-col items-center gap-2 transition-all", qty > 0 ? "border-slate-700 opacity-100" : "border-slate-800 opacity-50")}>
-                  <div className="relative">
-                    <BiscuitIcon biscuit={b} size="sm" />
-                    <span className="absolute -top-1 -right-1 bg-slate-800 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-slate-600">{qty}</span>
+               <div key={b.id} className={clsx("flex-shrink-0 bg-slate-900 border rounded-2xl p-3 md:p-5 w-28 md:w-48 flex flex-col items-center gap-3 transition-all group", qty > 0 ? "border-slate-700 opacity-100 shadow-lg" : "border-slate-800 opacity-60")}>
+                  <div className="relative transform group-hover:scale-105 transition-transform duration-300">
+                    <BiscuitIcon biscuit={b} size="sm" className="md:w-20 md:h-20 md:text-4xl" />
+                    <span className="absolute -top-2 -right-2 bg-slate-800 text-white text-[10px] md:text-xs font-bold px-2 py-0.5 rounded-full border border-slate-600 shadow">{qty}</span>
                   </div>
-                  <span className="text-xs font-bold text-slate-400 truncate w-full text-center">{b.name}</span>
+                  <span className="text-xs md:text-sm font-bold text-slate-400 truncate w-full text-center group-hover:text-white transition-colors">{b.name}</span>
                </div>
              );
           })}
         </div>
       </section>
 
-      {/* Main Tabs */}
-      <div className="flex border-b border-slate-800 mb-6 bg-slate-900/50 rounded-t-xl overflow-hidden">
+      {/* Main Tabs - Larger on Desktop */}
+      <div className="flex border-b border-slate-800 mb-8 bg-slate-900/50 rounded-t-2xl overflow-hidden shadow-sm">
         {[
           { id: 'market', label: 'Fixed Exchange', icon: RefreshCcw },
           { id: 'p2p', label: 'P2P Market', icon: ShoppingBag },
@@ -334,13 +349,13 @@ export const Dashboard: React.FC = () => {
             key={tab.id}
             onClick={() => setActiveTab(tab.id as any)}
             className={clsx(
-              "flex-1 py-4 text-sm font-semibold flex items-center justify-center gap-2 transition-all border-b-2",
+              "flex-1 py-4 md:py-6 text-sm md:text-lg font-bold flex items-center justify-center gap-2 md:gap-3 transition-all border-b-2 tracking-wide",
               activeTab === tab.id 
-                ? "border-amber-500 text-white bg-slate-800" 
-                : "border-transparent text-slate-500 hover:text-slate-300 hover:bg-slate-800/50"
+                ? "border-amber-500 text-white bg-slate-800/80" 
+                : "border-transparent text-slate-500 hover:text-slate-300 hover:bg-slate-800/40"
             )}
           >
-            <tab.icon size={16} /> {tab.label}
+            <tab.icon className="w-4 h-4 md:w-5 md:h-5" /> {tab.label}
           </button>
         ))}
       </div>
@@ -348,7 +363,7 @@ export const Dashboard: React.FC = () => {
       {/* Content Area */}
       <div>
         {activeTab === 'market' && (
-           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
              {rules.map(rule => {
                 const fromB = getBiscuit(rule.fromBiscuitId);
                 const toB = getBiscuit(rule.toBiscuitId);
@@ -365,9 +380,9 @@ export const Dashboard: React.FC = () => {
                 );
              })}
              {rules.length === 0 && (
-                <div className="col-span-full text-center py-12 text-slate-500">
-                  <RefreshCcw size={32} className="mx-auto mb-3 opacity-50" />
-                  <p>No fixed exchange rules active.</p>
+                <div className="col-span-full text-center py-20 text-slate-500 border-2 border-dashed border-slate-800 rounded-3xl bg-slate-900/30">
+                  <RefreshCcw size={48} className="mx-auto mb-4 opacity-50" />
+                  <p className="text-lg font-medium">No fixed exchange rules active.</p>
                 </div>
              )}
            </div>
@@ -375,15 +390,15 @@ export const Dashboard: React.FC = () => {
 
         {activeTab === 'p2p' && (
            <div>
-              <div className="flex justify-end mb-4">
+              <div className="flex justify-end mb-6">
                  <button 
                    onClick={() => setIsCreatingTrade(true)}
-                   className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white px-5 py-2.5 rounded-lg text-sm font-bold shadow-lg shadow-amber-900/20 active:scale-95 transition-all"
+                   className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white px-6 py-3 md:px-8 md:py-4 rounded-xl text-sm md:text-lg font-bold shadow-xl shadow-amber-900/20 active:scale-95 transition-all"
                  >
-                   <Plus size={16} /> Create Offer
+                   <Plus size={20} /> Create Offer
                  </button>
               </div>
-              <div className="space-y-4">
+              <div className="space-y-4 md:space-y-6">
                  {activeP2P.map(trade => {
                     const offerB = getBiscuit(trade.offerBiscuitId);
                     const reqB = getBiscuit(trade.requestBiscuitId);
@@ -391,41 +406,55 @@ export const Dashboard: React.FC = () => {
                     const canAfford = getQty(trade.requestBiscuitId) >= trade.requestQty;
 
                     return (
-                      <div key={trade.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4">
-                         <div className="flex items-center gap-6 flex-1">
-                            <div className="flex flex-col items-center">
-                               <BiscuitIcon biscuit={offerB} size="sm" />
-                               <span className="text-xs font-bold mt-1 text-slate-400">x{trade.offerQty}</span>
+                      <div key={trade.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 md:p-8 flex flex-col lg:flex-row items-center justify-between gap-6 hover:border-slate-700 transition-colors shadow-sm">
+                         <div className="flex items-center gap-6 md:gap-10 flex-1 w-full justify-center lg:justify-start">
+                            <div className="flex flex-col items-center gap-2">
+                               <BiscuitIcon biscuit={offerB} size="sm" className="md:w-20 md:h-20 md:text-4xl" />
+                               <span className="text-xs md:text-base font-bold text-slate-400">x{trade.offerQty} {offerB.name}</span>
                             </div>
-                            <ArrowRight className="text-slate-600" />
-                            <div className="flex flex-col items-center">
-                               <BiscuitIcon biscuit={reqB} size="sm" />
-                               <span className="text-xs font-bold mt-1 text-amber-500">x{trade.requestQty}</span>
+                            
+                            <div className="flex flex-col items-center justify-center px-2">
+                                <ArrowRight className="text-slate-600 w-6 h-6 md:w-8 md:h-8" />
                             </div>
-                            <div className="ml-4 border-l border-slate-800 pl-6">
-                               <div className="text-sm font-bold text-white">{trade.creatorName}</div>
-                               <div className="text-xs text-slate-500 uppercase tracking-wider font-bold mt-0.5">{trade.tradeType} TRADE</div>
+
+                            <div className="flex flex-col items-center gap-2">
+                               {trade.isAny ? (
+                                   <div className="w-10 h-10 md:w-20 md:h-20 flex items-center justify-center text-2xl md:text-4xl bg-slate-800 rounded-full border border-slate-700 shadow-inner">🎁</div>
+                               ) : (
+                                   <BiscuitIcon biscuit={reqB} size="sm" className="md:w-20 md:h-20 md:text-4xl" />
+                               )}
+                               <span className="text-xs md:text-base font-bold text-amber-500">
+                                   {trade.isAny ? "Any Item" : `x${trade.requestQty} ${reqB.name}`}
+                               </span>
+                            </div>
+
+                            <div className="hidden lg:block h-12 w-px bg-slate-800 mx-4"></div>
+
+                            <div className="text-center lg:text-left">
+                               <div className="text-sm md:text-xl font-bold text-white">{trade.creatorName}</div>
+                               <div className="text-xs md:text-sm text-slate-500 uppercase tracking-wider font-bold mt-1">{trade.tradeType} TRADE</div>
                             </div>
                          </div>
+                         
                          <button 
                            onClick={() => handleAcceptTrade(trade)}
                            disabled={!canAfford}
                            className={clsx(
-                             "px-6 py-3 rounded-lg font-bold text-xs uppercase tracking-wide transition-all min-w-[120px]",
+                             "w-full lg:w-auto px-8 py-4 rounded-xl font-bold text-sm md:text-lg uppercase tracking-wide transition-all shadow-lg min-w-[160px]",
                              canAfford 
-                               ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20" 
-                               : "bg-slate-800 text-slate-500 cursor-not-allowed"
+                               ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/20 active:scale-95" 
+                               : "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700"
                            )}
                          >
-                            {canAfford ? "Accept" : "Need Stock"}
+                            {canAfford ? "Accept Deal" : "Need Stock"}
                          </button>
                       </div>
                     );
                  })}
                  {activeP2P.length === 0 && (
-                    <div className="text-center py-12 text-slate-500">
-                      <ShoppingBag size={32} className="mx-auto mb-3 opacity-50" />
-                      <p>No active P2P offers. Be the first!</p>
+                    <div className="text-center py-20 text-slate-500 border-2 border-dashed border-slate-800 rounded-3xl">
+                      <ShoppingBag size={48} className="mx-auto mb-4 opacity-50" />
+                      <p className="text-lg font-medium">No active P2P offers. Be the first!</p>
                     </div>
                  )}
               </div>
@@ -433,53 +462,105 @@ export const Dashboard: React.FC = () => {
         )}
 
         {activeTab === 'history' && (
-           <div className="space-y-4">
-              {myActiveTrades.sort((a,b) => b.createdAt - a.createdAt).map(trade => {
+           <div className="space-y-4 md:space-y-6">
+              {myHistoryTrades.sort((a,b) => b.createdAt - a.createdAt).map(trade => {
                  const offerB = getBiscuit(trade.offerBiscuitId);
                  const reqB = getBiscuit(trade.requestBiscuitId);
                  if (!offerB || !reqB) return null;
                  
                  const isCreator = trade.creatorId === user?.id;
-                 const statusColor = trade.status === 'COMPLETED' ? 'text-emerald-400' : trade.status === 'CANCELLED' ? 'text-red-400' : 'text-amber-400';
+                 const statusColor = trade.status === 'COMPLETED' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : trade.status === 'CANCELLED' ? 'text-red-400 bg-red-500/10 border-red-500/20' : 'text-amber-400 bg-amber-500/10 border-amber-500/20';
                  const needsMyConfirm = trade.status === 'PENDING' && ((isCreator && !trade.creatorConfirmed) || (!isCreator && !trade.takerConfirmed));
                  const waitingPartner = trade.status === 'PENDING' && ((isCreator && trade.creatorConfirmed) || (!isCreator && trade.takerConfirmed));
 
+                 // Logic for Partner Name
+                 let partnerName = isCreator ? trade.takerName : trade.creatorName;
+                 if (!partnerName) {
+                    if (trade.status === 'CANCELLED') partnerName = "—";
+                    else partnerName = "Pending...";
+                 }
+
                  return (
-                    <div key={trade.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4">
-                        <div className="flex items-center gap-4 text-sm text-slate-400 flex-1">
-                           <span className={clsx("text-[10px] font-bold uppercase px-2 py-0.5 rounded border border-slate-700 bg-slate-800", statusColor)}>{trade.status}</span>
-                           <span className="text-xs text-slate-500">{new Date(trade.createdAt).toLocaleDateString()}</span>
-                           
-                           <div className="flex items-center gap-2">
-                             <span>{isCreator ? "You offered" : `${trade.creatorName} offered`}</span>
-                             <span className="font-bold text-white">{trade.offerQty} {offerB.name}</span>
-                             <ArrowRight size={12} />
-                             <span>for</span>
-                             <span className="font-bold text-white">{trade.requestQty} {reqB.name}</span>
+                    <div key={trade.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 md:p-8 flex flex-col lg:flex-row items-center gap-6 shadow-sm">
+                        {/* 1. STATUS & DATE */}
+                        <div className="flex flex-col items-center lg:items-start min-w-[140px] gap-2 border-r border-transparent lg:border-slate-800 pr-0 lg:pr-8 w-full lg:w-auto">
+                            <span className={clsx("text-xs md:text-sm font-bold uppercase px-3 py-1.5 rounded-lg w-full text-center border tracking-wide", statusColor)}>
+                              {trade.status}
+                            </span>
+                            <div className="text-[10px] md:text-xs text-slate-500 flex flex-row lg:flex-col items-center lg:items-start gap-4 lg:gap-1 mt-1">
+                              <span className="flex items-center gap-1.5"><Calendar size={12}/> {new Date(trade.createdAt).toLocaleDateString()}</span>
+                              <span className="flex items-center gap-1.5"><Clock size={12}/> {new Date(trade.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                            </div>
+                        </div>
+
+                        {/* 2. TRANSACTION DETAILS */}
+                        <div className="flex-1 w-full">
+                           <div className="flex items-center justify-between gap-4 bg-slate-950/50 p-4 md:p-6 rounded-xl border border-slate-800">
+                              {/* LEFT: You gave / they gave */}
+                              <div className="flex items-center gap-3">
+                                 <div className="flex flex-col items-end">
+                                    <span className="text-[10px] md:text-xs uppercase font-bold text-slate-500 mb-1">{isCreator ? "You Offered" : "Partner Offered"}</span>
+                                    <span className="text-sm md:text-xl font-bold text-white flex items-center gap-3">
+                                       {trade.offerQty} {offerB.name}
+                                       <BiscuitIcon biscuit={offerB} size="sm" className="w-8 h-8 md:w-12 md:h-12 text-sm md:text-xl"/>
+                                    </span>
+                                 </div>
+                              </div>
+
+                              <ArrowRight className="text-slate-600 w-5 h-5 md:w-8 md:h-8" />
+
+                              {/* RIGHT: You got / they got */}
+                              <div className="flex items-center gap-3">
+                                 <div className="flex flex-col items-start">
+                                    <span className="text-[10px] md:text-xs uppercase font-bold text-slate-500 mb-1">{isCreator ? "You Requested" : "Partner Requested"}</span>
+                                    {trade.isAny && trade.status === 'OPEN' ? (
+                                        <span className="text-sm md:text-xl font-bold text-purple-400 flex items-center gap-3">
+                                            🎁 Surprise
+                                        </span>
+                                    ) : (
+                                        <span className="text-sm md:text-xl font-bold text-white flex items-center gap-3">
+                                            <BiscuitIcon biscuit={reqB} size="sm" className="w-8 h-8 md:w-12 md:h-12 text-sm md:text-xl"/>
+                                            {trade.requestQty} {reqB.name}
+                                        </span>
+                                    )}
+                                 </div>
+                              </div>
                            </div>
                         </div>
 
-                        <div className="flex gap-2">
+                        {/* 3. PARTNER INFO */}
+                        <div className="flex flex-col items-center lg:items-start min-w-[140px] text-xs md:text-sm">
+                           <span className="text-[10px] md:text-xs uppercase font-bold text-slate-500 mb-1.5">Partner</span>
+                           <div className="flex items-center gap-2 text-slate-300 font-bold bg-slate-800 px-4 py-2 rounded-lg border border-slate-700">
+                              <User size={14} /> {partnerName}
+                           </div>
+                        </div>
+
+                        {/* 4. ACTIONS */}
+                        <div className="flex gap-3 w-full lg:w-auto justify-center">
                            {trade.status === 'OPEN' && isCreator && (
-                              <button onClick={() => handleCancelTrade(trade)} className="text-xs font-bold text-red-400 hover:text-red-300 bg-red-500/10 px-3 py-1.5 rounded border border-red-500/20">Cancel Offer</button>
+                              <button onClick={() => handleCancelTrade(trade)} className="text-xs md:text-sm font-bold text-red-400 hover:text-red-300 bg-red-500/10 px-6 py-3 rounded-xl border border-red-500/20 whitespace-nowrap hover:bg-red-500/20 transition-colors">
+                                Cancel
+                              </button>
                            )}
                            
                            {needsMyConfirm && (
-                              <button onClick={() => handleConfirmTrade(trade)} className="flex items-center gap-2 text-xs font-bold text-emerald-950 bg-emerald-500 hover:bg-emerald-400 px-4 py-2 rounded shadow-lg shadow-emerald-500/20 animate-pulse">
-                                <CheckCircle size={14}/> Confirm Receipt
+                              <button onClick={() => handleConfirmTrade(trade)} className="flex items-center gap-2 text-xs md:text-sm font-bold text-emerald-950 bg-emerald-500 hover:bg-emerald-400 px-6 py-3 rounded-xl shadow-lg shadow-emerald-500/20 animate-pulse whitespace-nowrap transition-colors">
+                                <CheckCircle size={16}/> Confirm Receipt
                               </button>
                            )}
                            
                            {waitingPartner && (
-                              <span className="text-xs font-bold text-slate-500 italic flex items-center gap-2"><Loader2 size={12} className="animate-spin"/> Partner Confirming...</span>
+                              <span className="text-xs md:text-sm font-bold text-slate-500 italic flex items-center gap-2 whitespace-nowrap bg-slate-950 px-4 py-2 rounded-lg border border-slate-800"><Loader2 size={14} className="animate-spin"/> Waiting Partner...</span>
                            )}
                         </div>
                     </div>
                  );
               })}
-              {myActiveTrades.length === 0 && (
-                <div className="text-center py-12 text-slate-500">
-                   <p>No trade history found.</p>
+              {myHistoryTrades.length === 0 && (
+                <div className="text-center py-20 text-slate-500 border-2 border-dashed border-slate-800 rounded-3xl">
+                   <History size={48} className="mx-auto mb-4 opacity-50"/>
+                   <p className="text-lg font-medium">No trade history found.</p>
                 </div>
               )}
            </div>
@@ -496,20 +577,20 @@ export const Dashboard: React.FC = () => {
         icon={<Package className="text-amber-500" />}
       >
         <form onSubmit={handleRestock} className="space-y-6">
-          <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800 mb-6">
+          <div className="flex bg-slate-950 p-1.5 rounded-xl border border-slate-800 mb-6">
              <button
                type="button"
                onClick={() => setManageMode('add')}
-               className={clsx("flex-1 py-2 text-xs font-bold uppercase rounded-md transition-all flex items-center justify-center gap-2", manageMode === 'add' ? "bg-emerald-600 text-white shadow" : "text-slate-500 hover:text-slate-300")}
+               className={clsx("flex-1 py-3 text-xs md:text-sm font-bold uppercase rounded-lg transition-all flex items-center justify-center gap-2", manageMode === 'add' ? "bg-emerald-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-300")}
              >
-               <Plus size={14} /> Add Stock
+               <Plus size={16} /> Add Stock
              </button>
              <button
                type="button"
                onClick={() => setManageMode('remove')}
-               className={clsx("flex-1 py-2 text-xs font-bold uppercase rounded-md transition-all flex items-center justify-center gap-2", manageMode === 'remove' ? "bg-red-600 text-white shadow" : "text-slate-500 hover:text-slate-300")}
+               className={clsx("flex-1 py-3 text-xs md:text-sm font-bold uppercase rounded-lg transition-all flex items-center justify-center gap-2", manageMode === 'remove' ? "bg-red-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-300")}
              >
-               <Minus size={14} /> Remove Stock
+               <Minus size={16} /> Remove Stock
              </button>
           </div>
 
@@ -528,7 +609,7 @@ export const Dashboard: React.FC = () => {
               <button 
                 type="button" 
                 onClick={() => setRestockQty(Math.max(1, restockQty - 1))}
-                className="h-11 w-11 flex items-center justify-center bg-slate-800 border border-slate-700 rounded-lg text-slate-400 hover:text-white hover:border-slate-600 transition-all active:scale-95"
+                className="h-12 w-12 flex items-center justify-center bg-slate-800 border border-slate-700 rounded-xl text-slate-400 hover:text-white hover:border-slate-600 transition-all active:scale-95"
               >
                 <Minus size={20} />
               </button>
@@ -540,14 +621,14 @@ export const Dashboard: React.FC = () => {
                     const val = parseInt(e.target.value);
                     setRestockQty(isNaN(val) ? 0 : val);
                   }} 
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-amber-500 outline-none text-lg font-mono text-center font-bold" 
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white focus:border-amber-500 outline-none text-xl font-mono text-center font-bold" 
                 />
                 <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-600 text-[10px] font-bold tracking-wider pointer-events-none">PKTS</span>
               </div>
               <button 
                 type="button" 
                 onClick={() => setRestockQty(restockQty + 1)}
-                className="h-11 w-11 flex items-center justify-center bg-slate-800 border border-slate-700 rounded-lg text-slate-400 hover:text-white hover:border-slate-600 transition-all active:scale-95"
+                className="h-12 w-12 flex items-center justify-center bg-slate-800 border border-slate-700 rounded-xl text-slate-400 hover:text-white hover:border-slate-600 transition-all active:scale-95"
               >
                 <Plus size={20} />
               </button>
@@ -557,7 +638,7 @@ export const Dashboard: React.FC = () => {
              type="submit" 
              disabled={!restockId} 
              className={clsx(
-               "w-full py-3 rounded-lg font-bold text-sm shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed text-white",
+               "w-full py-4 rounded-xl font-bold text-sm md:text-base shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed text-white uppercase tracking-wide",
                manageMode === 'add' ? "bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/20" : "bg-red-600 hover:bg-red-500 shadow-red-900/20"
              )}
           >
@@ -574,74 +655,108 @@ export const Dashboard: React.FC = () => {
         icon={<RefreshCw className="text-amber-500"/>}
         maxWidth="max-w-4xl"
       >
-         <form onSubmit={handleCreateTrade} className="space-y-6">
+         <form onSubmit={handleCreateTrade} className="space-y-8">
             {/* Header Tabs */}
-            <div className="flex gap-4">
+            <div className="flex gap-4 bg-slate-950 p-1.5 rounded-xl border border-slate-800">
                <button 
                  type="button"
                  onClick={() => setTradeType('FIXED')}
                  className={clsx(
-                   "flex-1 py-3 text-sm font-bold uppercase tracking-wide rounded-lg border transition-all flex items-center justify-center gap-2",
+                   "flex-1 py-3 text-sm md:text-base font-bold uppercase tracking-wide rounded-lg transition-all flex items-center justify-center gap-2",
                    tradeType === 'FIXED' 
-                     ? "bg-slate-800 border-slate-600 text-white shadow-lg" 
-                     : "bg-slate-950/50 border-slate-800 text-slate-500 hover:text-slate-300"
+                     ? "bg-slate-800 text-white shadow-lg" 
+                     : "text-slate-500 hover:text-slate-300"
                  )}
                >
-                 <RefreshCcw size={16} /> Fixed Price
+                 <RefreshCcw size={18} /> Fixed Price
                </button>
                <button 
                  type="button"
                  onClick={() => setTradeType('AUCTION')}
                  className={clsx(
-                   "flex-1 py-3 text-sm font-bold uppercase tracking-wide rounded-lg border transition-all flex items-center justify-center gap-2",
+                   "flex-1 py-3 text-sm md:text-base font-bold uppercase tracking-wide rounded-lg transition-all flex items-center justify-center gap-2",
                    tradeType === 'AUCTION' 
-                     ? "bg-gradient-to-r from-purple-600 to-pink-600 border-transparent text-white shadow-lg shadow-purple-900/20" 
-                     : "bg-slate-950/50 border-slate-800 text-slate-500 hover:text-slate-300"
+                     ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg" 
+                     : "text-slate-500 hover:text-slate-300"
                  )}
                >
-                 <Gavel size={16} /> Auction
+                 <Gavel size={18} /> Auction
                </button>
             </div>
 
             {/* Horizontal Layout */}
-            <div className="flex flex-col md:flex-row items-center gap-4">
+            <div className="flex flex-col md:flex-row items-center gap-6">
                {/* Left: YOU GIVE */}
-               <div className="flex-1 w-full space-y-2 p-5 bg-slate-950 rounded-xl border border-slate-800">
-                  <span className="text-[10px] uppercase font-bold text-emerald-500 flex items-center gap-1.5 mb-2">
-                    <ArrowRight size={12} className="rotate-180" /> You Give
+               <div className="flex-1 w-full space-y-3 p-6 bg-slate-950 rounded-2xl border border-slate-800 shadow-inner">
+                  <span className="text-xs uppercase font-bold text-emerald-500 flex items-center gap-2 mb-3">
+                    <ArrowRight size={14} className="rotate-180" /> You Give
                   </span>
                   
                   <div className="flex items-center gap-3">
                      <div className="flex-1">
-                        <CustomSelect value={offerId} onChange={setOfferId} options={biscuitOptions} placeholder="Select Item"/>
+                        <CustomSelect 
+                           value={offerId} 
+                           onChange={(val) => {
+                             setOfferId(val);
+                             setOfferQty(1); // Reset qty on change
+                           }} 
+                           options={biscuitOptions} 
+                           placeholder="Select Item"
+                        />
                      </div>
                   </div>
                   
-                  <div className="flex items-center border border-slate-700 rounded-lg bg-slate-900 mt-3 h-11">
-                    <button type="button" onClick={() => setOfferQty(Math.max(1, offerQty - 1))} className="w-10 h-full flex items-center justify-center text-slate-400 hover:text-white border-r border-slate-700 active:bg-slate-800 rounded-l-lg transition-colors"><Minus size={16}/></button>
+                  <div className={clsx("flex items-center border rounded-xl mt-3 h-12 transition-colors", !offerId ? "border-slate-800 bg-slate-900/50 opacity-50" : "border-slate-700 bg-slate-900")}>
+                    <button 
+                        type="button" 
+                        disabled={!offerId || offerQty <= 1}
+                        onClick={() => setOfferQty(Math.max(1, offerQty - 1))} 
+                        className="w-12 h-full flex items-center justify-center text-slate-400 hover:text-white border-r border-slate-700 active:bg-slate-800 rounded-l-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <Minus size={18}/>
+                    </button>
+                    
                     <input 
-                      type="number" min="1" 
+                      type="number" min="1" max={maxOfferAvailable}
                       value={offerQty} 
-                      onChange={e => setOfferQty(Math.max(1, parseInt(e.target.value) || 0))} 
-                      className="flex-1 bg-transparent text-center text-white font-bold font-mono outline-none"
+                      disabled={!offerId}
+                      onChange={e => {
+                          const val = parseInt(e.target.value) || 0;
+                          setOfferQty(Math.max(1, Math.min(val, maxOfferAvailable)));
+                      }} 
+                      className="flex-1 bg-transparent text-center text-white font-bold font-mono outline-none text-lg disabled:cursor-not-allowed disabled:text-slate-500"
                     />
-                    <button type="button" onClick={() => setOfferQty(offerQty + 1)} className="w-10 h-full flex items-center justify-center text-slate-400 hover:text-white border-l border-slate-700 active:bg-slate-800 rounded-r-lg transition-colors"><Plus size={16}/></button>
+                    
+                    <button 
+                        type="button" 
+                        disabled={!offerId || offerQty >= maxOfferAvailable}
+                        onClick={() => setOfferQty(Math.min(maxOfferAvailable, offerQty + 1))} 
+                        className="w-12 h-full flex items-center justify-center text-slate-400 hover:text-white border-l border-slate-700 active:bg-slate-800 rounded-r-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <Plus size={18}/>
+                    </button>
                   </div>
+                  {offerId && (
+                     <div className="flex justify-between items-center text-[10px] font-bold mt-1 px-1">
+                         <span className="text-slate-500 uppercase tracking-wider">Inventory Limit</span>
+                         <span className={clsx("transition-colors", offerQty === maxOfferAvailable ? "text-amber-500" : "text-slate-400")}>{offerQty} / {maxOfferAvailable}</span>
+                     </div>
+                  )}
                </div>
                
                {/* Center Arrow */}
                <div className="flex items-center justify-center text-slate-600 shrink-0">
-                  <ArrowRight className="hidden md:block text-slate-500" size={28} />
-                  <ArrowRight className="block md:hidden rotate-90 text-slate-500" size={28} />
+                  <ArrowRight className="hidden md:block text-slate-500" size={32} />
+                  <ArrowRight className="block md:hidden rotate-90 text-slate-500" size={32} />
                </div>
 
                {/* Right: YOU GET / PREFERRED */}
-               <div className="flex-1 w-full space-y-2 p-5 bg-slate-950 rounded-xl border border-slate-800">
+               <div className="flex-1 w-full space-y-3 p-6 bg-slate-950 rounded-2xl border border-slate-800 shadow-inner">
                   <span className={clsx(
-                      "text-[10px] uppercase font-bold flex items-center gap-1.5 mb-2",
+                      "text-xs uppercase font-bold flex items-center gap-2 mb-3",
                       tradeType === 'AUCTION' ? "text-purple-400" : "text-amber-500"
                   )}>
-                    <ArrowRight size={12} /> {tradeType === 'AUCTION' ? "Preferred (Optional)" : "You Get"}
+                    <ArrowRight size={14} /> {tradeType === 'AUCTION' ? "Preferred (Optional)" : "You Get"}
                   </span>
                   
                   <div className="flex items-center gap-3">
@@ -655,16 +770,19 @@ export const Dashboard: React.FC = () => {
                      </div>
                   </div>
 
-                  <div className="flex items-center border border-slate-700 rounded-lg bg-slate-900 mt-3 h-11">
-                    <button type="button" onClick={() => setReqQty(Math.max(1, reqQty - 1))} className="w-10 h-full flex items-center justify-center text-slate-400 hover:text-white border-r border-slate-700 active:bg-slate-800 rounded-l-lg transition-colors"><Minus size={16}/></button>
-                    <input 
-                      type="number" min="1" 
-                      value={reqQty} 
-                      onChange={e => setReqQty(Math.max(1, parseInt(e.target.value) || 0))} 
-                      className="flex-1 bg-transparent text-center text-white font-bold font-mono outline-none"
-                    />
-                    <button type="button" onClick={() => setReqQty(reqQty + 1)} className="w-10 h-full flex items-center justify-center text-slate-400 hover:text-white border-l border-slate-700 active:bg-slate-800 rounded-r-lg transition-colors"><Plus size={16}/></button>
-                  </div>
+                  {/* Hide quantity if "Any" is selected */}
+                  {reqId !== 'any' && (
+                    <div className="flex items-center border border-slate-700 rounded-xl bg-slate-900 mt-3 h-12">
+                        <button type="button" onClick={() => setReqQty(Math.max(1, reqQty - 1))} className="w-12 h-full flex items-center justify-center text-slate-400 hover:text-white border-r border-slate-700 active:bg-slate-800 rounded-l-xl transition-colors"><Minus size={18}/></button>
+                        <input 
+                        type="number" min="1" 
+                        value={reqQty} 
+                        onChange={e => setReqQty(Math.max(1, parseInt(e.target.value) || 0))} 
+                        className="flex-1 bg-transparent text-center text-white font-bold font-mono outline-none text-lg"
+                        />
+                        <button type="button" onClick={() => setReqQty(reqQty + 1)} className="w-12 h-full flex items-center justify-center text-slate-400 hover:text-white border-l border-slate-700 active:bg-slate-800 rounded-r-xl transition-colors"><Plus size={18}/></button>
+                    </div>
+                  )}
                </div>
             </div>
 
@@ -672,7 +790,7 @@ export const Dashboard: React.FC = () => {
               type="submit" 
               disabled={!offerId || (tradeType === 'FIXED' && !reqId)} 
               className={clsx(
-                "w-full font-bold py-4 rounded-lg shadow-lg transition-all text-sm uppercase tracking-wide",
+                "w-full font-bold py-5 rounded-xl shadow-xl transition-all text-base md:text-lg uppercase tracking-wide active:scale-[0.99]",
                 tradeType === 'AUCTION' 
                    ? "bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white" 
                    : "bg-amber-600 hover:bg-amber-500 text-white"
@@ -690,39 +808,39 @@ export const Dashboard: React.FC = () => {
         title="Add New Biscuit" 
         icon={<Cookie className="text-amber-500" />}
       >
-        <form onSubmit={handleBiscuitSubmit} className="space-y-4">
+        <form onSubmit={handleBiscuitSubmit} className="space-y-5">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Name</label>
-              <input value={formName} onChange={e => setFormName(e.target.value)} placeholder="e.g. Bourbon" className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm focus:border-amber-500 outline-none" required />
+              <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5">Name</label>
+              <input value={formName} onChange={e => setFormName(e.target.value)} placeholder="e.g. Bourbon" className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-white text-sm focus:border-amber-500 outline-none" required />
             </div>
             <div>
-              <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Brand</label>
-              <input value={formBrand} onChange={e => setFormBrand(e.target.value)} placeholder="e.g. Britannia" className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm focus:border-amber-500 outline-none" required />
+              <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5">Brand</label>
+              <input value={formBrand} onChange={e => setFormBrand(e.target.value)} placeholder="e.g. Britannia" className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-white text-sm focus:border-amber-500 outline-none" required />
             </div>
           </div>
           <div>
-            <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Icon / Image</label>
-             <div className="flex items-center gap-3">
-               <div className="w-12 h-12 bg-slate-800 rounded-lg flex items-center justify-center overflow-hidden border border-slate-700">
-                  {formIcon && (formIcon.startsWith('http') || formIcon.startsWith('data:')) ? <img src={formIcon} className="w-full h-full object-cover"/> : <span className="text-2xl">{formIcon || '🍪'}</span>}
+            <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5">Icon / Image</label>
+             <div className="flex items-center gap-4">
+               <div className="w-16 h-16 bg-slate-800 rounded-xl flex items-center justify-center overflow-hidden border border-slate-700 shadow-inner">
+                  {formIcon && (formIcon.startsWith('http') || formIcon.startsWith('data:')) ? <img src={formIcon} className="w-full h-full object-cover"/> : <span className="text-3xl">{formIcon || '🍪'}</span>}
                </div>
                <div className="flex-1 flex gap-2">
-                 <button type="button" onClick={() => fileInputRef.current?.click()} className="flex-1 text-xs bg-slate-800 hover:bg-slate-700 px-3 py-2 rounded border border-slate-700 text-white flex items-center justify-center gap-2"><Upload size={14}/> Upload Image</button>
+                 <button type="button" onClick={() => fileInputRef.current?.click()} className="flex-1 text-sm bg-slate-800 hover:bg-slate-700 px-4 py-3 rounded-lg border border-slate-700 text-white flex items-center justify-center gap-2 transition-colors"><Upload size={16}/> Upload Image</button>
                </div>
                <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept="image/*" />
              </div>
           </div>
           <div>
             <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Color Tag</label>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-3">
               {BRAND_COLORS.map(c => (
                 <button 
                   type="button" 
                   key={c.name} 
                   onClick={() => setFormColor(c.class)} 
                   className={clsx(
-                    "w-8 h-8 rounded-full border-2 transition-transform", 
+                    "w-9 h-9 rounded-full border-2 transition-transform", 
                     c.class, 
                     formColor === c.class ? "border-white scale-110 shadow-lg" : "border-transparent opacity-50 hover:opacity-100 hover:scale-105"
                   )} 
@@ -730,7 +848,7 @@ export const Dashboard: React.FC = () => {
               ))}
             </div>
           </div>
-          <button type="submit" className="w-full py-3 bg-amber-600 hover:bg-amber-500 rounded-lg text-white font-bold text-sm shadow-lg shadow-amber-900/20 active:scale-[0.98]">
+          <button type="submit" className="w-full py-4 bg-amber-600 hover:bg-amber-500 rounded-xl text-white font-bold text-sm shadow-lg shadow-amber-900/20 active:scale-[0.98] uppercase tracking-wide">
             Create Biscuit
           </button>
         </form>

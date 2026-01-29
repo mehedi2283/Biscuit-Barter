@@ -51,7 +51,8 @@ export interface P2PTrade {
   requestQty: number;
   
   status: P2PTradeStatus;
-  tradeType: P2PTradeType; // New Field
+  tradeType: P2PTradeType; 
+  isAny?: boolean; // New flag for "Surprise Me" trades
   
   creatorConfirmed: boolean;
   takerConfirmed: boolean;
