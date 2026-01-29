@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useAuth } from '../context/AuthContext';
 import { BackendService, supabase } from '../services/backend';
 import { Biscuit, ExchangeRule, P2PTrade, User, InventoryItem } from '../types';
 import { CustomSelect } from '../components/CustomSelect';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { Modal } from '../components/Modal';
 import { BiscuitIcon } from '../components/BiscuitIcon';
-import { Plus, Trash2, RefreshCcw, User as UserIcon, ArrowRight, History, Cookie, Settings, Check, X, Lock, Unlock, Pen, Upload, Info, Loader2, ExternalLink } from 'lucide-react';
+import { Plus, Trash2, RefreshCcw, User as UserIcon, ArrowRight, History, Cookie, Settings, Check, X, Lock, Unlock, Pen, Upload, Info, Loader2, ExternalLink, Search } from 'lucide-react';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -21,7 +22,9 @@ const BRAND_COLORS = [
 ];
 
 export const AdminDashboard: React.FC = () => {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'users' | 'biscuits' | 'trades' | 'rules'>('users');
+  const [isLoading, setIsLoading] = useState(false);
   
   const [rules, setRules] = useState<ExchangeRule[]>([]);
   const [biscuits, setBiscuits] = useState<Biscuit[]>([]);
@@ -32,12 +35,15 @@ export const AdminDashboard: React.FC = () => {
   const [selectedUser, setSelectedUser] = useState<string>('');
   const [userInventory, setUserInventory] = useState<InventoryItem[]>([]);
 
-  // Biscuit Edit State
+  // Biscuit Create/Edit State
+  const [isCreatingBiscuit, setIsCreatingBiscuit] = useState(false);
   const [editingBiscuit, setEditingBiscuit] = useState<Biscuit | null>(null);
-  const [editName, setEditName] = useState('');
-  const [editBrand, setEditBrand] = useState('');
-  const [editColor, setEditColor] = useState('');
-  const [editIcon, setEditIcon] = useState('');
+  
+  // Form State (Shared for Create/Edit)
+  const [formName, setFormName] = useState('');
+  const [formBrand, setFormBrand] = useState('');
+  const [formColor, setFormColor] = useState(BRAND_COLORS[0].class);
+  const [formIcon, setFormIcon] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Deletion State for Biscuits
@@ -49,6 +55,7 @@ export const AdminDashboard: React.FC = () => {
   // Initial Data Load & Realtime
   useEffect(() => {
     const fetchData = async () => {
+      setIsLoading(true);
       // Parallel fetch for speed on mount
       const [r, b, u, t] = await Promise.all([
         BackendService.getRules(),
@@ -60,20 +67,22 @@ export const AdminDashboard: React.FC = () => {
       setBiscuits(b);
       setUsers(u);
       setAllTrades(t);
+      setIsLoading(false);
     };
     fetchData();
 
     // REALTIME SUBSCRIPTION FOR ADMIN
-    // Listens to changes in all key tables to update UI instantly without reload
     const channel = supabase.channel('admin_dashboard')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
           BackendService.getUsers().then(setUsers);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'biscuits' }, () => {
-          BackendService.getBiscuits().then(setBiscuits);
-          // Refresh rules/trades too as they might be cascade deleted or updated
-          BackendService.getRules().then(setRules);
-          BackendService.getAllTrades().then(setAllTrades);
+          BackendService.getBiscuits().then(b => {
+             setBiscuits(b);
+             // Also refresh dependent data
+             BackendService.getRules().then(setRules);
+             BackendService.getAllTrades().then(setAllTrades);
+          });
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'exchange_rules' }, () => {
           BackendService.getRules().then(setRules);
@@ -86,10 +95,10 @@ export const AdminDashboard: React.FC = () => {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // Fetch data specific to the active tab when switching
-  // This ensures that even if realtime missed an event, the user sees fresh data upon navigation
+  // Helpers to refresh specific data on tab switch
   useEffect(() => {
     const refreshTab = async () => {
+      // Background refresh without full loader to keep UI snappy
       if (activeTab === 'users') setUsers(await BackendService.getUsers());
       if (activeTab === 'biscuits') setBiscuits(await BackendService.getBiscuits());
       if (activeTab === 'trades') setAllTrades(await BackendService.getAllTrades());
@@ -106,7 +115,6 @@ export const AdminDashboard: React.FC = () => {
     if (selectedUser) {
       loadUserInventory(selectedUser);
       
-      // Subscribe to inventory changes for the selected user
       const invChannel = supabase.channel(`admin_inv_${selectedUser}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory', filter: `user_id=eq.${selectedUser}` }, () => {
            loadUserInventory(selectedUser);
@@ -132,10 +140,8 @@ export const AdminDashboard: React.FC = () => {
       msg: user.isFrozen ? `Unfreeze ${user.name}? They will be able to trade again.` : `Freeze ${user.name}? They will be unable to login or trade.`,
       isDestructive: !user.isFrozen,
       onConfirm: async () => {
-        // Optimistic Update
         setUsers(prev => prev.map(u => u.id === user.id ? { ...u, isFrozen: !user.isFrozen } : u));
         await BackendService.toggleUserFreeze(user.id, user.isFrozen);
-        // Background refresh to confirm
         BackendService.getUsers().then(setUsers);
       }
     });
@@ -147,19 +153,28 @@ export const AdminDashboard: React.FC = () => {
       msg: `Permanently delete ${user.name}? This removes their inventory and trade history. This cannot be undone.`,
       isDestructive: true,
       onConfirm: async () => {
-        // Optimistic Update
         setUsers(prev => prev.filter(u => u.id !== user.id));
         await BackendService.deleteUser(user.id);
       }
     });
   };
 
+  // --- BISCUIT ACTIONS ---
+
+  const openCreateBiscuit = () => {
+    setFormName('');
+    setFormBrand('');
+    setFormColor(BRAND_COLORS[0].class);
+    setFormIcon('🍪');
+    setIsCreatingBiscuit(true);
+  };
+
   const openEditBiscuit = (b: Biscuit) => {
     setEditingBiscuit(b);
-    setEditName(b.name);
-    setEditBrand(b.brand);
-    setEditColor(b.color);
-    setEditIcon(b.icon);
+    setFormName(b.name);
+    setFormBrand(b.brand);
+    setFormColor(b.color);
+    setFormIcon(b.icon);
   };
 
   const handleDeleteBiscuit = (b: Biscuit) => {
@@ -172,9 +187,8 @@ export const AdminDashboard: React.FC = () => {
         const success = await BackendService.deleteBiscuit(b.id);
         if (success) {
            if (editingBiscuit?.id === b.id) setEditingBiscuit(null);
-           // Optimistic Update
            setBiscuits(prev => prev.filter(i => i.id !== b.id));
-           // Refresh dependencies
+           // Dependencies refresh
            BackendService.getRules().then(setRules);
            BackendService.getAllTrades().then(setAllTrades);
         } else {
@@ -185,24 +199,38 @@ export const AdminDashboard: React.FC = () => {
     });
   };
 
-  const handleSaveBiscuit = async (e: React.FormEvent) => {
+  const handleBiscuitSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingBiscuit) return;
+    if (!user) return;
     
-    // Create optimistic object
-    const updatedBiscuit = { ...editingBiscuit, name: editName, brand: editBrand, color: editColor, icon: editIcon };
-    setBiscuits(prev => prev.map(b => b.id === editingBiscuit.id ? updatedBiscuit : b));
-    setEditingBiscuit(null);
+    // VALIDATION
+    if (!formName || !formBrand) {
+        alert("Name and Brand are required.");
+        return;
+    }
 
-    await BackendService.updateBiscuit(editingBiscuit.id, {
-      name: editName,
-      brand: editBrand,
-      color: editColor,
-      icon: editIcon
-    });
-    
-    // Confirm with server
-    BackendService.getBiscuits().then(setBiscuits);
+    if (isCreatingBiscuit) {
+        const res = await BackendService.createBiscuit(user.id, formName, formBrand, formIcon || '🍪', formColor);
+        if (res.success) {
+            setIsCreatingBiscuit(false);
+            setBiscuits(await BackendService.getBiscuits());
+        } else {
+            alert(res.error);
+        }
+    } else if (editingBiscuit) {
+        // Optimistic
+        const updated = { ...editingBiscuit, name: formName, brand: formBrand, color: formColor, icon: formIcon };
+        setBiscuits(prev => prev.map(b => b.id === editingBiscuit.id ? updated : b));
+        setEditingBiscuit(null);
+
+        await BackendService.updateBiscuit(editingBiscuit.id, {
+            name: formName,
+            brand: formBrand,
+            color: formColor,
+            icon: formIcon
+        });
+        BackendService.getBiscuits().then(setBiscuits);
+    }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -210,14 +238,15 @@ export const AdminDashboard: React.FC = () => {
     if (file) {
       const reader = new FileReader();
       reader.onload = (e) => {
-        setEditIcon(e.target?.result as string);
+        setFormIcon(e.target?.result as string);
       };
       reader.readAsDataURL(file);
     }
   };
 
+  // --- RULE ACTIONS ---
+
   const toggleRule = async (rule: ExchangeRule) => {
-    // Optimistic
     const updated = { ...rule, isActive: !rule.isActive };
     setRules(prev => prev.map(r => r.id === rule.id ? updated : r));
     await BackendService.saveRule(updated);
@@ -240,7 +269,6 @@ export const AdminDashboard: React.FC = () => {
        alert("You need at least two biscuit types to create a trade route.");
        return;
     }
-
     const newRule: ExchangeRule = {
       id: Date.now().toString(), // Temp ID
       fromBiscuitId: biscuits[0].id,
@@ -249,11 +277,8 @@ export const AdminDashboard: React.FC = () => {
       toQty: 1,
       isActive: false
     };
-    
-    // Add optimistic (with temp ID)
     setRules(prev => [...prev, newRule]);
     await BackendService.saveRule(newRule);
-    // Refresh to get real ID
     BackendService.getRules().then(setRules);
   };
 
@@ -261,11 +286,12 @@ export const AdminDashboard: React.FC = () => {
     const rule = rules.find(r => r.id === id);
     if (rule) {
       const updated = { ...rule, [field]: value };
-      // Optimistic update
       setRules(prev => prev.map(r => r.id === id ? updated : r));
       await BackendService.saveRule(updated);
     }
   };
+
+  // --- INVENTORY ACTIONS ---
 
   const handleInventoryChange = (biscuitId: string, val: string) => {
     const qty = parseInt(val);
@@ -281,7 +307,6 @@ export const AdminDashboard: React.FC = () => {
 
   const getBiscuitName = (id: string) => biscuits.find(b => b.id === id)?.name || id;
   const getBiscuit = (id: string) => biscuits.find(b => b.id === id);
-
   const biscuitOptions = biscuits.map(b => ({ value: b.id, label: b.name, icon: b.icon }));
   const userOptions = users.map(u => ({ value: u.id, label: `${u.name} (${u.email})` }));
 
@@ -295,38 +320,57 @@ export const AdminDashboard: React.FC = () => {
         isDestructive={confirmState.isDestructive}
       />
 
-      {/* Edit Biscuit Modal */}
-      <Modal isOpen={!!editingBiscuit} onClose={() => setEditingBiscuit(null)} title="Edit Biscuit Details" icon={<Cookie className="text-amber-500" />}>
-        <form onSubmit={handleSaveBiscuit} className="space-y-4">
+      {/* Biscuit Modal (Shared for Create/Edit) */}
+      <Modal 
+        isOpen={!!editingBiscuit || isCreatingBiscuit} 
+        onClose={() => { setEditingBiscuit(null); setIsCreatingBiscuit(false); }} 
+        title={isCreatingBiscuit ? "Add New Biscuit" : "Edit Biscuit Details"} 
+        icon={<Cookie className="text-amber-500" />}
+      >
+        <form onSubmit={handleBiscuitSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Name</label>
-              <input value={editName} onChange={e => setEditName(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" />
+              <input value={formName} onChange={e => setFormName(e.target.value)} placeholder="e.g. Bourbon" className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm focus:border-amber-500 outline-none" required />
             </div>
             <div>
               <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Brand</label>
-              <input value={editBrand} onChange={e => setEditBrand(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" />
+              <input value={formBrand} onChange={e => setFormBrand(e.target.value)} placeholder="e.g. Britannia" className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm focus:border-amber-500 outline-none" required />
             </div>
           </div>
           <div>
-            <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Icon</label>
+            <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Icon / Image</label>
              <div className="flex items-center gap-3">
                <div className="w-12 h-12 bg-slate-800 rounded-lg flex items-center justify-center overflow-hidden border border-slate-700">
-                  {editIcon.startsWith('http') || editIcon.startsWith('data:') ? <img src={editIcon} className="w-full h-full object-cover"/> : <span className="text-2xl">{editIcon}</span>}
+                  {formIcon && (formIcon.startsWith('http') || formIcon.startsWith('data:')) ? <img src={formIcon} className="w-full h-full object-cover"/> : <span className="text-2xl">{formIcon || '🍪'}</span>}
                </div>
-               <button type="button" onClick={() => fileInputRef.current?.click()} className="text-xs bg-slate-800 hover:bg-slate-700 px-3 py-2 rounded border border-slate-700 text-white flex gap-2"><Upload size={14}/> Upload New</button>
-               <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
+               <div className="flex-1 flex gap-2">
+                 <button type="button" onClick={() => fileInputRef.current?.click()} className="flex-1 text-xs bg-slate-800 hover:bg-slate-700 px-3 py-2 rounded border border-slate-700 text-white flex items-center justify-center gap-2"><Upload size={14}/> Upload Image</button>
+                 {/* Removed Emoji Input here too */}
+               </div>
+               <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept="image/*" />
              </div>
           </div>
           <div>
             <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Color Tag</label>
             <div className="flex flex-wrap gap-2">
               {BRAND_COLORS.map(c => (
-                <button type="button" key={c.name} onClick={() => setEditColor(c.class)} className={clsx("w-6 h-6 rounded-full border-2", c.class, editColor === c.class ? "border-white scale-110" : "border-transparent opacity-50")} />
+                <button 
+                  type="button" 
+                  key={c.name} 
+                  onClick={() => setFormColor(c.class)} 
+                  className={clsx(
+                    "w-8 h-8 rounded-full border-2 transition-transform", 
+                    c.class, 
+                    formColor === c.class ? "border-white scale-110 shadow-lg" : "border-transparent opacity-50 hover:opacity-100 hover:scale-105"
+                  )} 
+                />
               ))}
             </div>
           </div>
-          <button type="submit" className="w-full py-2 bg-amber-600 hover:bg-amber-500 rounded text-white font-bold text-sm">Save Changes</button>
+          <button type="submit" className="w-full py-3 bg-amber-600 hover:bg-amber-500 rounded-lg text-white font-bold text-sm shadow-lg shadow-amber-900/20 active:scale-[0.98]">
+            {isCreatingBiscuit ? 'Create Biscuit' : 'Save Changes'}
+          </button>
         </form>
       </Modal>
 
@@ -360,7 +404,12 @@ export const AdminDashboard: React.FC = () => {
         ))}
       </div>
 
-      <div className="flex-1">
+      <div className="flex-1 relative min-h-[400px]">
+        {isLoading && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/50 backdrop-blur-sm rounded-xl">
+               <Loader2 className="animate-spin text-amber-500" size={32}/>
+            </div>
+        )}
         
         {/* USERS TAB */}
         {activeTab === 'users' && (
@@ -371,25 +420,28 @@ export const AdminDashboard: React.FC = () => {
                 <div className="col-span-2">Status</div>
                 <div className="col-span-4 text-right">Actions</div>
              </div>
-             <div className="divide-y divide-slate-800/50">
+             <div className="divide-y divide-slate-800/50 max-h-[600px] overflow-y-auto">
                {users.map(u => (
                  <div key={u.id} className="grid grid-cols-12 gap-4 p-4 items-center hover:bg-slate-800/30 transition-colors">
                     <div className="col-span-4">
-                       <div className="font-bold text-slate-200 text-sm">{u.name}</div>
+                       <div className="font-bold text-slate-200 text-sm flex items-center gap-2">
+                           {u.name} 
+                           {u.role === 'ADMIN' && <span className="text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 rounded">ADMIN</span>}
+                       </div>
                        <div className="text-xs text-slate-500">{u.email}</div>
                     </div>
-                    <div className="col-span-2">
-                       <span className={clsx("text-[10px] px-2 py-0.5 rounded border uppercase font-bold", u.role === 'ADMIN' ? "bg-purple-500/10 text-purple-400 border-purple-500/20" : "bg-slate-800 text-slate-400 border-slate-700")}>{u.role}</span>
+                    <div className="col-span-2 text-xs text-slate-400">
+                       {u.role}
                     </div>
                     <div className="col-span-2">
                        {u.isFrozen ? (
-                         <span className="flex items-center gap-1 text-xs text-red-400 font-bold"><Lock size={12}/> Frozen</span>
+                         <span className="flex items-center gap-1 text-xs text-red-400 font-bold bg-red-900/10 px-2 py-1 rounded w-fit"><Lock size={12}/> Frozen</span>
                        ) : (
-                         <span className="flex items-center gap-1 text-xs text-emerald-400 font-bold"><Check size={12}/> Active</span>
+                         <span className="flex items-center gap-1 text-xs text-emerald-400 font-bold bg-emerald-900/10 px-2 py-1 rounded w-fit"><Check size={12}/> Active</span>
                        )}
                     </div>
                     <div className="col-span-4 flex justify-end gap-2">
-                       <button onClick={() => handleToggleFreeze(u)} className={clsx("p-2 rounded hover:bg-slate-700 transition-colors", u.isFrozen ? "text-emerald-400" : "text-amber-500")} title={u.isFrozen ? "Unfreeze" : "Freeze"}>
+                       <button onClick={() => handleToggleFreeze(u)} className={clsx("p-2 rounded hover:bg-slate-700 transition-colors border border-transparent", u.isFrozen ? "text-emerald-400 hover:border-emerald-500/30" : "text-amber-500 hover:border-amber-500/30")} title={u.isFrozen ? "Unfreeze" : "Freeze"}>
                           {u.isFrozen ? <Unlock size={16} /> : <Lock size={16} />}
                        </button>
                        <button onClick={() => handleDeleteUser(u)} className="p-2 rounded hover:bg-red-900/20 text-slate-600 hover:text-red-500 transition-colors" title="Delete User">
@@ -404,57 +456,81 @@ export const AdminDashboard: React.FC = () => {
 
         {/* BISCUITS TAB */}
         {activeTab === 'biscuits' && (
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
-            {biscuits.map(b => (
-              <div key={b.id} className="bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col items-center gap-4 relative group hover:border-slate-600 transition-all overflow-hidden">
-                 
-                 {/* Deletion Loading Overlay */}
-                 {deletingId === b.id && (
-                    <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-sm z-20 flex flex-col items-center justify-center text-center p-2 rounded-xl">
-                      <Loader2 className="animate-spin text-red-500 mb-2" size={28} />
-                      <span className="text-red-400 text-[10px] font-bold uppercase tracking-wider">Deleting...</span>
+          <div className="space-y-6">
+            <div className="flex items-center justify-between bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                <div className="flex items-center gap-3">
+                   <div className="bg-amber-500/10 p-2 rounded-lg"><Cookie className="text-amber-500" size={20}/></div>
+                   <div>
+                      <h3 className="text-sm font-bold text-white">Item Catalogue</h3>
+                      <p className="text-xs text-slate-500">Manage available biscuits in the system.</p>
+                   </div>
+                </div>
+                <button 
+                  onClick={openCreateBiscuit}
+                  className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-lg shadow-amber-900/20 transition-all active:scale-95"
+                >
+                  <Plus size={16} /> Add Item
+                </button>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
+                {biscuits.map(b => (
+                <div key={b.id} className="bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col items-center gap-4 relative group hover:border-slate-600 transition-all overflow-hidden shadow-sm">
+                    {/* Deletion Loading Overlay */}
+                    {deletingId === b.id && (
+                        <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-sm z-20 flex flex-col items-center justify-center text-center p-2 rounded-xl">
+                        <Loader2 className="animate-spin text-red-500 mb-2" size={28} />
+                        <span className="text-red-400 text-[10px] font-bold uppercase tracking-wider">Deleting...</span>
+                        </div>
+                    )}
+
+                    {/* Manual Delete Link Indicator */}
+                    {b.imageDeleteHash && b.imageDeleteHash.startsWith('http') && (
+                    <a 
+                        href={b.imageDeleteHash} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="absolute top-2 left-2 p-1.5 bg-slate-800 rounded text-slate-500 hover:text-red-400 hover:bg-slate-700 opacity-0 group-hover:opacity-100 transition-all z-10"
+                        title="Open External Delete Page (Manual)"
+                    >
+                        <ExternalLink size={14} />
+                    </a>
+                    )}
+
+                    <BiscuitIcon biscuit={b} size="lg" />
+                    <div className="text-center w-full">
+                        <div className="font-bold text-slate-200 truncate">{b.name}</div>
+                        <div className="text-xs text-slate-500 truncate">{b.brand}</div>
                     </div>
-                 )}
-
-                 {/* Manual Delete Link Indicator (Requested Feature) */}
-                 {b.imageDeleteHash && b.imageDeleteHash.startsWith('http') && (
-                   <a 
-                     href={b.imageDeleteHash} 
-                     target="_blank" 
-                     rel="noopener noreferrer"
-                     className="absolute top-2 left-2 p-1.5 bg-slate-800 rounded text-slate-500 hover:text-red-400 hover:bg-slate-700 opacity-0 group-hover:opacity-100 transition-all z-10"
-                     title="Open External Delete Page (Manual)"
-                   >
-                     <ExternalLink size={14} />
-                   </a>
-                 )}
-
-                 <BiscuitIcon biscuit={b} size="lg" />
-                 <div className="text-center">
-                    <div className="font-bold text-slate-200">{b.name}</div>
-                    <div className="text-xs text-slate-500">{b.brand}</div>
-                 </div>
-                 
-                 <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                    <button 
-                      onClick={() => openEditBiscuit(b)}
-                      disabled={!!deletingId}
-                      className="p-1.5 bg-slate-800 rounded text-slate-500 hover:text-white hover:bg-slate-700 disabled:opacity-50"
-                      title="Edit Details"
-                    >
-                      <Pen size={14} />
-                    </button>
-                    <button 
-                      onClick={() => handleDeleteBiscuit(b)}
-                      disabled={!!deletingId}
-                      className="p-1.5 bg-slate-800 rounded text-slate-500 hover:text-red-400 hover:bg-slate-700 disabled:opacity-50"
-                      title="Delete Biscuit"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                 </div>
-              </div>
-            ))}
+                    
+                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                        <button 
+                        onClick={() => openEditBiscuit(b)}
+                        disabled={!!deletingId}
+                        className="p-1.5 bg-slate-800 rounded text-slate-500 hover:text-white hover:bg-slate-700 disabled:opacity-50 border border-slate-700 hover:border-slate-500"
+                        title="Edit Details"
+                        >
+                        <Pen size={14} />
+                        </button>
+                        <button 
+                        onClick={() => handleDeleteBiscuit(b)}
+                        disabled={!!deletingId}
+                        className="p-1.5 bg-slate-800 rounded text-slate-500 hover:text-red-400 hover:bg-slate-700 disabled:opacity-50 border border-slate-700 hover:border-red-900"
+                        title="Delete Biscuit"
+                        >
+                        <Trash2 size={14} />
+                        </button>
+                    </div>
+                </div>
+                ))}
+                {biscuits.length === 0 && (
+                    <div className="col-span-full py-12 text-center border-2 border-dashed border-slate-800 rounded-xl">
+                        <Cookie className="mx-auto text-slate-700 mb-2" size={32}/>
+                        <p className="text-slate-500 font-bold">Catalogue is empty.</p>
+                        <p className="text-slate-600 text-xs mt-1">Add your first biscuit above.</p>
+                    </div>
+                )}
+            </div>
           </div>
         )}
 
@@ -463,35 +539,39 @@ export const AdminDashboard: React.FC = () => {
           <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
              <div className="p-4 border-b border-slate-800 bg-slate-950/50 text-xs font-bold text-slate-500 flex justify-between">
                 <span>Total Trades: {allTrades.length}</span>
+                <span className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> Live Feed</span>
              </div>
              <div className="max-h-[600px] overflow-y-auto">
                 {allTrades.map(trade => {
                   const offerB = getBiscuit(trade.offerBiscuitId);
                   const reqB = getBiscuit(trade.requestBiscuitId);
-                  // Safely handle if biscuit was just deleted but trade update hasn't propagated or it's a ghost trade
                   if(!offerB || !reqB) return null;
                   
                   return (
-                    <div key={trade.id} className="p-4 border-b border-slate-800/50 flex items-center justify-between hover:bg-slate-800/20">
-                       <div className="flex items-center gap-4">
+                    <div key={trade.id} className="p-4 border-b border-slate-800/50 flex flex-col md:flex-row items-center justify-between hover:bg-slate-800/20 gap-3">
+                       <div className="flex items-center gap-4 flex-1">
                           <span className={clsx("text-[10px] w-20 text-center py-1 rounded border font-bold uppercase", 
                              trade.status === 'COMPLETED' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
                              trade.status === 'OPEN' ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
                              trade.status === 'PENDING' ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
                              "bg-red-500/10 text-red-400 border-red-500/20"
                           )}>{trade.status}</span>
-                          <div className="text-sm text-slate-400">
-                             <span className="text-white font-bold">{trade.creatorName}</span> gave <span className="text-amber-500 font-mono">{trade.offerQty} {offerB.name}</span>
-                          </div>
-                          <ArrowRight size={14} className="text-slate-600"/>
-                          <div className="text-sm text-slate-400">
-                             to <span className="text-white font-bold">{trade.takerName || 'Anyone'}</span> for <span className="text-emerald-500 font-mono">{trade.requestQty} {reqB.name}</span>
+                          <div className="text-sm text-slate-400 flex flex-wrap items-center gap-2">
+                             <span className="text-white font-bold">{trade.creatorName}</span> offered <span className="text-amber-500 font-mono">{trade.offerQty} {offerB.name}</span>
+                             <ArrowRight size={14} className="text-slate-600"/>
+                             <span className="text-emerald-500 font-mono">{trade.requestQty} {reqB.name}</span>
+                             {trade.takerName && <span className="text-slate-500">to <span className="text-white font-bold">{trade.takerName}</span></span>}
                           </div>
                        </div>
-                       <div className="text-[10px] text-slate-300 font-mono">{new Date(trade.createdAt).toLocaleDateString()}</div>
+                       <div className="text-[10px] text-slate-500 font-mono whitespace-nowrap">{new Date(trade.createdAt).toLocaleString()}</div>
                     </div>
                   )
                 })}
+                {allTrades.length === 0 && (
+                    <div className="p-12 text-center text-slate-500">
+                        No trade history available.
+                    </div>
+                )}
              </div>
           </div>
         )}
@@ -512,21 +592,11 @@ export const AdminDashboard: React.FC = () => {
                   <Plus size={14} /> Add Route
                 </button>
               </div>
-
-              <div className="px-6 pt-4">
-                 <div className="bg-blue-900/10 border border-blue-500/20 rounded-lg p-3 flex gap-3 text-blue-300">
-                    <Info size={18} className="shrink-0 mt-0.5" />
-                    <div className="text-xs space-y-1 leading-relaxed">
-                       <p className="font-bold">About Exchange Routes</p>
-                       <p className="opacity-80">These rules define fixed exchange rates used for automated system trades or reference pricing. Users can still create custom P2P offers in the marketplace.</p>
-                    </div>
-                 </div>
-              </div>
               
               <div className="p-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                 {rules.length === 0 && (
                    <div className="col-span-full text-center py-10 text-slate-500 text-sm italic border-dashed border border-slate-800 rounded-xl">
-                      No static rules defined yet. Click "Add Route" to create one.
+                      No static rules defined.
                    </div>
                 )}
                 {rules.map(rule => (
@@ -624,7 +694,7 @@ export const AdminDashboard: React.FC = () => {
                            />
                          </div>
                        ))}
-                       {userInventory.length === 0 && <p className="text-slate-500">No inventory found for this user.</p>}
+                       {userInventory.length === 0 && <p className="text-slate-500">No inventory found or user has no items.</p>}
                      </div>
                    ) : (
                      <div className="h-full flex items-center justify-center bg-slate-950/50 rounded-xl border border-slate-800 border-dashed min-h-[200px]">

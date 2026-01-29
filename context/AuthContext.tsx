@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User } from '../types';
 import { BackendService, supabase } from '../services/backend';
 
@@ -22,97 +22,81 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  
-  // Ref to track user state inside event listeners (avoids stale closures)
-  const userRef = useRef<User | null>(null);
 
-  useEffect(() => {
-    userRef.current = user;
-  }, [user]);
+  // Optimistic User Setter: Sets user from Session immediately, then tries DB
+  const processSession = useCallback(async (sessionUser: any) => {
+    if (!sessionUser) return;
 
-  // Helper to sync Supabase Auth user with our Public Profile
-  const fetchUser = async (userId: string) => {
+    // 1. Construct Basic User from Session (Fast)
+    const basicUser: User = {
+      id: sessionUser.id,
+      email: sessionUser.email,
+      name: sessionUser.user_metadata?.name || sessionUser.email?.split('@')[0] || 'Trader',
+      role: 'USER', // Default, upgraded later if DB fetch succeeds
+      isFrozen: false
+    };
+
+    // Set immediately if we don't have a user, to unblock UI
+    setUser(prev => prev ? prev : basicUser);
+
+    // 2. Fetch Full Profile from DB (Async)
     try {
-      const foundUser = await BackendService.getUserById(userId);
-      if (foundUser) {
-        setUser(foundUser);
-        return true;
+      const dbUser = await BackendService.getUserById(sessionUser.id);
+      if (dbUser) {
+        setUser(dbUser);
       }
-      return false;
     } catch (e) {
-      console.error("Error fetching user profile:", e);
-      return false;
+      console.warn("DB Profile fetch failed, using session fallback.", e);
     }
-  };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
 
-    // Failsafe: If loading takes longer than 5 seconds, force it off.
-    // This prevents the "stuck on loading" screen if Supabase hangs or logic fails.
-    const loadingTimeout = setTimeout(() => {
-      if (mounted && isLoading) {
-        console.warn("Auth loading timed out. Forcing app load.");
-        setIsLoading(false);
-      }
-    }, 5000);
+    // Safety: Force loading to false after 2s max to prevent black screen
+    const safetyTimer = setTimeout(() => {
+       if (mounted && isLoading) setIsLoading(false);
+    }, 2000);
 
     const initAuth = async () => {
       try {
-        // 1. Initial Session Check
-        const { data: { session }, error } = await supabase.auth.getSession();
-        
-        if (error) throw error;
-
-        if (session?.user) {
-           const hasProfile = await fetchUser(session.user.id);
-           
-           // If session exists but profile is missing (DB inconsistency), log them out
-           if (!hasProfile && mounted) {
-             console.warn("Session found but profile missing. Cleaning up.");
-             await supabase.auth.signOut();
-             setUser(null);
-           }
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user && mounted) {
+           await processSession(session.user);
         }
-      } catch (e) {
-        console.error("Auth initialization failed:", e);
-        // If auth fails completely, ensure we don't leave the user with a broken state
-        if (mounted) setUser(null);
+      } catch (err) {
+        console.error("Session check failed", err);
       } finally {
         if (mounted) setIsLoading(false);
-        clearTimeout(loadingTimeout);
       }
     };
 
     initAuth();
 
-    // 2. Listen for Auth Changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!mounted) return;
-
-      if (event === 'SIGNED_IN' && session?.user) {
-        // Use Ref to check if we already have this user loaded to prevent race conditions
-        const currentUser = userRef.current;
-        if (!currentUser || currentUser.id !== session.user.id) {
-           await fetchUser(session.user.id);
+      
+      if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+        if (session?.user) {
+          processSession(session.user);
+          // Don't wait for DB to stop loading, session is enough for UI
+          setIsLoading(false);
         }
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
-        setIsLoading(false); // Ensure app knows we are done loading to show Login screen
+        setIsLoading(false);
       }
     });
 
     return () => {
       mounted = false;
-      clearTimeout(loadingTimeout);
+      clearTimeout(safetyTimer);
       subscription.unsubscribe();
     };
-  }, []);
+  }, [processSession]);
 
   const login = async (email: string, password: string): Promise<RegisterResult> => {
-    // We let the component handle UI loading state, but we update Context state on success
     const { user: foundUser, error } = await BackendService.authenticate(email, password);
-    
     if (foundUser) {
       setUser(foundUser);
       return { success: true };
@@ -123,29 +107,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const register = async (name: string, email: string, password: string): Promise<RegisterResult> => {
     const { user: newUser, error } = await BackendService.createUser(name, email, password);
-    
     if (newUser) {
-      return { success: true, message: "Account created! Please check your email to confirm." };
+      return { success: true, message: "Account created! Check email." };
     } else {
       return { success: false, message: error || 'Registration failed' };
     }
   };
 
   const logout = async () => {
-    try {
-      await supabase.auth.signOut();
-    } catch (e) {
-      console.error("Logout error:", e);
-    } finally {
-      // Force local cleanup immediately
-      setUser(null);
-      setIsLoading(false); 
-    }
+    await supabase.auth.signOut();
+    setUser(null);
+    setIsLoading(false);
   };
 
   const refreshUser = async () => {
-    if (user) await fetchUser(user.id);
-  }
+    if (user) {
+        const foundUser = await BackendService.getUserById(user.id);
+        if (foundUser) setUser(foundUser);
+    }
+  };
 
   return (
     <AuthContext.Provider value={{ user, login, register, logout, refreshUser, isAuthenticated: !!user, isLoading }}>

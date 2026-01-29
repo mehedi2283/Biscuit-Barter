@@ -124,38 +124,49 @@ export const BackendService = {
   },
 
   authenticate: async (email: string, password: string): Promise<{user?: User, error?: string}> => {
-    // 1. Sign In via Supabase Auth (GoTrue)
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      console.warn("Auth failed:", error.message);
-      return { error: error.message };
-    }
-    if (!data.user) return { error: "Auth provider error" };
+    try {
+      // 1. Sign In via Supabase Auth (GoTrue)
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      
+      if (error) {
+        console.warn("Auth failed:", error.message);
+        return { error: error.message };
+      }
+      
+      if (!data.user) {
+        return { error: "Authentication failed. No user returned." };
+      }
 
-    // 2. Fetch Profile from public.users
-    let profile = await BackendService.getUserById(data.user.id);
-    
-    // Retry logic if profile creation trigger is slow
-    if (!profile) {
-       console.log("Profile not found immediately, retrying...");
-       await new Promise(r => setTimeout(r, 1000));
-       profile = await BackendService.getUserById(data.user.id);
-       
-       if (!profile) {
-           await new Promise(r => setTimeout(r, 2000));
-           profile = await BackendService.getUserById(data.user.id);
-       }
-    }
+      // 2. Fetch Profile from public.users
+      let profile = await BackendService.getUserById(data.user.id);
+      
+      // Retry logic if profile creation trigger is slow
+      if (!profile) {
+         console.log("Profile not found immediately, retrying...");
+         await new Promise(r => setTimeout(r, 1000));
+         profile = await BackendService.getUserById(data.user.id);
+         
+         if (!profile) {
+             await new Promise(r => setTimeout(r, 2000));
+             profile = await BackendService.getUserById(data.user.id);
+         }
+      }
 
-    if (!profile) {
-      return { error: "Login successful, but User Profile is missing. Did you reset the database? Please sign up again." };
-    }
+      if (!profile) {
+        return { error: "Login successful, but User Profile is missing. Did you reset the database? Please sign up again." };
+      }
 
-    if (profile.isFrozen) {
-      return { error: "Your account has been frozen by an Administrator." };
+      if (profile.isFrozen) {
+        // Force logout if frozen
+        await supabase.auth.signOut();
+        return { error: "Your account has been frozen by an Administrator." };
+      }
+      
+      return { user: profile };
+    } catch (e: any) {
+      console.error("Login Exception:", e);
+      return { error: e.message || "Unexpected login error." };
     }
-    
-    return { user: profile };
   },
 
   createUser: async (name: string, email: string, password: string): Promise<{user?: User, error?: string}> => {
@@ -337,7 +348,8 @@ export const BackendService = {
 
       if (error) throw error;
 
-      if (data) await BackendService.updateUserInventory(userId, data.id, 10);
+      // REMOVED: Automatic 10 inventory grant. New biscuits start at 0.
+      // if (data) await BackendService.updateUserInventory(userId, data.id, 10);
       
       const newBiscuit: Biscuit = {
         id: data.id,

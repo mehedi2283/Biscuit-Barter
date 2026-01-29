@@ -1,4 +1,5 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
 
@@ -15,8 +16,10 @@ interface ModalProps {
 }
 
 export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, icon, children, maxWidth = 'max-w-md' }) => {
-  // Close on Escape key
+  const [mounted, setMounted] = useState(false);
+
   useEffect(() => {
+    setMounted(true);
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
@@ -24,10 +27,12 @@ export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, icon, chil
     return () => window.removeEventListener('keydown', handleEsc);
   }, [isOpen, onClose]);
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center px-4">
           <MotionDiv 
             initial={{ opacity: 0 }} 
             animate={{ opacity: 1 }} 
@@ -63,6 +68,7 @@ export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, icon, chil
           </MotionDiv>
         </div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 };

@@ -1,5 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
+// Declare Deno to prevent "Cannot find name 'Deno'" error
+declare const Deno: any;
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -23,7 +26,7 @@ serve(async (req) => {
     const { action, image, deleteHash } = body;
     
     // API Key with fallback to ensure functionality if secrets aren't set
-    const apiKey = (Deno as any).env.get('IMGBB_API_KEY') || '70181233b2a623792a5a6fe64367f005';
+    const apiKey = Deno.env.get('IMGBB_API_KEY') || '70181233b2a623792a5a6fe64367f005';
 
     // --- UPLOAD HANDLER ---
     if (action === 'upload-image') {

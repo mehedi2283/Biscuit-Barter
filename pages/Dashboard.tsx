@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { BackendService, supabase } from '../services/backend';
-import { Biscuit, InventoryItem, P2PTrade, P2PTradeType, TradeBid } from '../types';
+import { Biscuit, ExchangeRule, InventoryItem, P2PTrade } from '../types';
 import { BiscuitIcon } from '../components/BiscuitIcon';
+import { TradeCard } from '../components/TradeCard';
 import { Modal } from '../components/Modal';
 import { CustomSelect } from '../components/CustomSelect';
 import { ConfirmModal } from '../components/ConfirmModal';
-import { RefreshCw, Plus, Check, Clock, ShoppingBag, X, ArrowRight, PackagePlus, Cookie, Upload, Loader2, AlertCircle, History, Gavel, HandCoins, User } from 'lucide-react';
+import { Package, Plus, Minus, RefreshCcw, ShoppingBag, History, ArrowRight, Gavel, Trash2, CheckCircle, Loader2, Cookie, Upload, RefreshCw } from 'lucide-react';
 import clsx from 'clsx';
+import { motion } from 'framer-motion';
 
 const BRAND_COLORS = [
   { name: 'Slate', class: 'bg-slate-700' },
@@ -21,747 +22,497 @@ const BRAND_COLORS = [
   { name: 'Pink', class: 'bg-pink-600' },
 ];
 
-// Fix for framer-motion type issues
-const MotionDiv = motion.div as any;
-const MotionButton = motion.button as any;
-
-// --- Sub-components for Trade UI ---
-
-const MarketTradeCard: React.FC<{
-  trade: P2PTrade;
-  biscuits: Biscuit[];
-  onAccept: () => void;
-  userBalance: number;
-}> = ({ trade, biscuits, onAccept, userBalance }) => {
-  const offerB = biscuits.find(b => b.id === trade.offerBiscuitId);
-  const reqB = biscuits.find(b => b.id === trade.requestBiscuitId);
-  
-  if (!offerB || !reqB) return null;
-
-  const canAfford = userBalance >= trade.requestQty;
-
-  return (
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 flex flex-col gap-6 hover:border-slate-600 transition-all shadow-lg group hover:shadow-2xl hover:shadow-black/50 relative overflow-hidden">
-      <div className="absolute top-0 right-0 p-2 opacity-50">
-        <RefreshCw size={100} className="text-slate-800 -rotate-12" />
-      </div>
-      
-      <div className="flex justify-between items-center border-b border-slate-800 pb-3 relative z-10">
-         <div className="flex items-center gap-3">
-           <div className="relative">
-             <div className="w-3 h-3 rounded-full bg-blue-500 animate-pulse shadow-[0_0_10px_rgba(59,130,246,0.5)]"></div>
-           </div>
-           <div>
-             <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block leading-none">Fixed Price</span>
-             <span className="text-sm font-bold text-white">{trade.creatorName}</span>
-           </div>
-         </div>
-         <span className="text-[10px] text-slate-700 font-mono font-bold px-2 py-1 bg-slate-950 rounded">#{trade.id.slice(0,4)}</span>
-      </div>
-
-      <div className="grid grid-cols-[1fr,auto,1fr] gap-4 items-center bg-slate-950/50 rounded-xl p-4 border border-slate-800/50 relative z-10">
-        {/* GET SIDE */}
-        <div className="flex flex-col items-center gap-2 p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/10 w-full transition-colors group-hover:bg-emerald-500/10">
-           <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-900/30 px-2 py-0.5 rounded">You Get</span>
-           <BiscuitIcon biscuit={offerB} size="md" className="shadow-2xl" />
-           <div className="text-center mt-1">
-             <span className="block text-2xl font-bold text-white leading-none">x{trade.offerQty}</span>
-             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide truncate max-w-[80px] block">{offerB.name}</span>
-           </div>
-        </div>
-        
-        {/* ARROW */}
-        <div className="flex flex-col items-center justify-center text-slate-600">
-           <ArrowRight size={32} strokeWidth={2.5} className="group-hover:text-amber-500 transition-colors duration-300" />
-        </div>
-
-        {/* GIVE SIDE */}
-        <div className="flex flex-col items-center gap-2 p-3 rounded-xl bg-amber-500/5 border border-amber-500/10 w-full transition-colors group-hover:bg-amber-500/10">
-           <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest bg-amber-900/30 px-2 py-0.5 rounded">You Give</span>
-           <BiscuitIcon biscuit={reqB} size="md" className="shadow-2xl" />
-           <div className="text-center mt-1">
-             <span className={clsx("block text-2xl font-bold leading-none", canAfford ? "text-white" : "text-red-400")}>x{trade.requestQty}</span>
-             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide truncate max-w-[80px] block">{reqB.name}</span>
-           </div>
-        </div>
-      </div>
-
-      <button 
-        onClick={onAccept}
-        disabled={!canAfford}
-        className={clsx(
-          "w-full py-4 rounded-xl font-bold text-sm uppercase tracking-widest transition-all flex items-center justify-center gap-3 relative z-10",
-          canAfford 
-            ? "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 active:scale-[0.98] hover:shadow-blue-500/20" 
-            : "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700 hover:bg-slate-800"
-        )}
-      >
-        {canAfford ? (
-          <>Accept Trade <Check size={18} strokeWidth={3} /></>
-        ) : (
-          <span className="flex items-center gap-2 text-red-400">
-             <X size={16}/> Insufficient Stock
-          </span>
-        )}
-      </button>
-    </div>
-  );
-};
-
-const AuctionTradeCard: React.FC<{
-  trade: P2PTrade;
-  biscuits: Biscuit[];
-  onBid: (biscuitId: string, qty: number) => void;
-}> = ({ trade, biscuits, onBid }) => {
-  const offerB = biscuits.find(b => b.id === trade.offerBiscuitId);
-  const prefB = biscuits.find(b => b.id === trade.requestBiscuitId);
-  const [bidQty, setBidQty] = useState(1);
-  const [bidBiscuitId, setBidBiscuitId] = useState(trade.requestBiscuitId || biscuits[0]?.id);
-
-  if (!offerB) return null;
-
-  const biscuitOptions = biscuits.map(b => ({ value: b.id, label: b.name, icon: b.icon }));
-
-  return (
-    <div className="bg-slate-900 border border-purple-500/30 rounded-2xl p-6 flex flex-col gap-6 hover:border-purple-500/60 transition-all shadow-lg group hover:shadow-2xl hover:shadow-purple-900/20 relative overflow-hidden">
-       {/* Decorative Background */}
-       <div className="absolute top-0 right-0 p-2 opacity-50">
-         <Gavel size={100} className="text-slate-800 -rotate-12" />
-       </div>
-
-      <div className="flex justify-between items-center border-b border-slate-800 pb-3 relative z-10">
-         <div className="flex items-center gap-3">
-           <div className="relative">
-             <div className="w-3 h-3 rounded-full bg-purple-500 animate-pulse shadow-[0_0_10px_rgba(168,85,247,0.5)]"></div>
-           </div>
-           <div>
-             <span className="text-xs text-purple-400 font-bold uppercase tracking-wider block leading-none">Auction</span>
-             <span className="text-sm font-bold text-white">{trade.creatorName}</span>
-           </div>
-         </div>
-         <span className="text-[10px] text-slate-700 font-mono font-bold px-2 py-1 bg-slate-950 rounded">#{trade.id.slice(0,4)}</span>
-      </div>
-
-      <div className="flex items-center justify-center py-2 relative z-10">
-         <div className="flex flex-col items-center gap-2 p-4 rounded-xl bg-purple-500/5 border border-purple-500/10 w-full">
-            <span className="text-[10px] font-black text-purple-400 uppercase tracking-widest bg-purple-900/30 px-2 py-0.5 rounded">Offered Item</span>
-            <div className="flex items-center gap-4">
-               <BiscuitIcon biscuit={offerB} size="lg" className="shadow-2xl ring-purple-500/30" />
-               <div className="flex flex-col">
-                  <span className="text-3xl font-bold text-white">x{trade.offerQty}</span>
-                  <span className="text-sm font-bold text-slate-400 uppercase">{offerB.name}</span>
-               </div>
-            </div>
-            {prefB && (
-               <div className="text-[10px] text-slate-500 mt-2 bg-slate-950 px-2 py-1 rounded border border-slate-800">
-                  Preferred: <span className="text-slate-300 font-bold">{trade.requestQty} {prefB.name}</span>
-               </div>
-            )}
-         </div>
-      </div>
-
-      <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800 relative z-10 space-y-3">
-         <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Your Bid</div>
-         <div className="flex gap-3">
-             <input type="number" min="1" value={bidQty} onChange={e => setBidQty(parseInt(e.target.value))} className="w-20 bg-slate-900 border border-slate-700 rounded-lg px-2 text-center text-white font-mono font-bold focus:border-purple-500 outline-none" />
-             <div className="flex-1">
-                <CustomSelect value={bidBiscuitId} onChange={setBidBiscuitId} options={biscuitOptions} />
-             </div>
-         </div>
-         <button 
-           onClick={() => onBid(bidBiscuitId, bidQty)}
-           className="w-full py-3 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-bold text-sm uppercase tracking-wide shadow-lg shadow-purple-900/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-         >
-           Place Bid <HandCoins size={16} />
-         </button>
-      </div>
-    </div>
-  );
-};
-
-const PendingTradeRow: React.FC<{
-  trade: P2PTrade;
-  biscuits: Biscuit[];
-  onConfirm: () => void;
-  isWaitingOnMe: boolean;
-}> = ({ trade, biscuits, onConfirm, isWaitingOnMe }) => {
-  const offerB = biscuits.find(b => b.id === trade.offerBiscuitId);
-  const reqB = biscuits.find(b => b.id === trade.requestBiscuitId);
-
-  if (!offerB || !reqB) return null;
-
-  return (
-    <div className={clsx(
-      "border rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden transition-all shadow-lg",
-      isWaitingOnMe ? "bg-amber-500/5 border-amber-500/30 shadow-amber-900/10" : "bg-slate-900/80 border-slate-800"
-    )}>
-       {isWaitingOnMe && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-amber-500" />}
-       
-       <div className="flex items-center gap-8 flex-1">
-          {/* OFFER PART */}
-          <div className="flex items-center gap-4">
-             <div className="relative">
-                <BiscuitIcon biscuit={offerB} size="md" />
-                <div className="absolute -bottom-2 -right-2 bg-slate-900 text-[10px] px-2 py-0.5 rounded-full border border-slate-700 text-emerald-400 font-bold shadow-lg">GET</div>
-             </div>
-             <div className="flex flex-col">
-                <span className="text-2xl font-bold text-white">{trade.offerQty} <span className="text-sm text-slate-400 font-normal">{offerB.name}</span></span>
-                <span className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">From {trade.creatorName}</span>
-             </div>
-          </div>
-          
-          <div className="hidden md:flex items-center justify-center w-12 h-12 rounded-full bg-slate-900 border border-slate-700 shrink-0">
-             <ArrowRight size={20} className="text-slate-500" />
-          </div>
-          
-          {/* REQUEST PART */}
-          <div className="flex items-center gap-4">
-             <div className="relative">
-                <BiscuitIcon biscuit={reqB} size="md" />
-                <div className="absolute -bottom-2 -right-2 bg-slate-900 text-[10px] px-2 py-0.5 rounded-full border border-slate-700 text-amber-500 font-bold shadow-lg">GIVE</div>
-             </div>
-             <div className="flex flex-col">
-                <span className="text-2xl font-bold text-white">{trade.requestQty} <span className="text-sm text-slate-400 font-normal">{reqB.name}</span></span>
-                <span className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">To {trade.takerName || 'Partner'}</span>
-             </div>
-          </div>
-       </div>
-
-       <div className="flex items-center justify-end md:min-w-[200px]">
-         {isWaitingOnMe ? (
-            <button 
-              onClick={onConfirm}
-              className="w-full md:w-auto px-8 py-4 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-900 font-bold text-sm rounded-xl shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
-            >
-              <Check size={20} strokeWidth={3} /> Confirm Receipt
-            </button>
-         ) : (
-            <div className="flex items-center gap-3 text-slate-400 text-sm font-bold px-6 py-4 bg-slate-950 rounded-xl border border-slate-800">
-               <Loader2 size={18} className="animate-spin text-amber-500" /> Waiting for Partner...
-            </div>
-         )}
-       </div>
-    </div>
-  );
-};
-
-const MyListingCard: React.FC<{
-  trade: P2PTrade;
-  biscuits: Biscuit[];
-  onCancel: () => void;
-  onAcceptBid: (bidId: string) => void;
-}> = ({ trade, biscuits, onCancel, onAcceptBid }) => {
-  const offerB = biscuits.find(b => b.id === trade.offerBiscuitId);
-  const reqB = biscuits.find(b => b.id === trade.requestBiscuitId);
-  const [bids, setBids] = useState<TradeBid[]>([]);
-  const [showBids, setShowBids] = useState(false);
-  
-  // Realtime bids fetch
-  useEffect(() => {
-    if (trade.tradeType === 'AUCTION') {
-      const fetchBids = async () => setBids(await BackendService.getBidsForTrade(trade.id));
-      fetchBids();
-      // Subscribe
-      const channel = supabase.channel(`bids_${trade.id}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'trade_bids', filter: `trade_id=eq.${trade.id}` }, fetchBids)
-        .subscribe();
-      return () => { supabase.removeChannel(channel) };
-    }
-  }, [trade.id, trade.tradeType]);
-
-  if (!offerB) return null;
-
-  return (
-    <div className={clsx(
-       "bg-slate-900/50 border rounded-2xl overflow-hidden transition-all duration-300 group shadow-lg flex flex-col",
-       trade.tradeType === 'AUCTION' ? "border-purple-500/30 hover:border-purple-500/60" : "border-slate-800 hover:border-slate-600"
-    )}>
-      <div className={clsx("p-1 h-1 w-full bg-gradient-to-r transition-all duration-500",
-         trade.tradeType === 'AUCTION' ? "from-purple-900 via-purple-500 to-purple-900" : "from-slate-800 via-blue-900 to-slate-800"
-      )} />
-      
-      <div className="p-5 flex-1 flex flex-col">
-        {/* Header */}
-        <div className="flex justify-between items-start mb-6">
-           <div className="flex flex-col gap-1">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Order Ref</span>
-              <span className="font-mono text-xs text-slate-300 bg-slate-950 px-2 py-1 rounded border border-slate-800">#{trade.id.slice(0, 6)}</span>
-           </div>
-           <div className={clsx("flex items-center gap-2 px-2.5 py-1 rounded-full border", 
-              trade.tradeType === 'AUCTION' ? "bg-purple-500/10 border-purple-500/20" : "bg-blue-500/10 border-blue-500/20"
-           )}>
-              <div className={clsx("w-1.5 h-1.5 rounded-full animate-pulse", trade.tradeType === 'AUCTION' ? "bg-purple-400" : "bg-blue-400")} />
-              <span className={clsx("text-[10px] font-bold uppercase tracking-wide", trade.tradeType === 'AUCTION' ? "text-purple-400" : "text-blue-400")}>
-                {trade.tradeType === 'AUCTION' ? "Live Auction" : "Fixed Price"}
-              </span>
-           </div>
-        </div>
-
-        {/* Content */}
-        <div className="flex items-center justify-between relative mb-6">
-           {/* Left */}
-           <div className="flex items-center gap-3">
-              <div className="relative">
-                 <BiscuitIcon biscuit={offerB} size="md" className="ring-2 ring-slate-800 group-hover:ring-slate-700 transition-all" />
-                 <div className="absolute -bottom-2 right-0 bg-slate-900 text-slate-300 text-[10px] font-bold px-1.5 py-0.5 rounded border border-slate-700 shadow-sm z-10">
-                   x{trade.offerQty}
-                 </div>
-              </div>
-              <div className="flex flex-col">
-                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">You Give</span>
-                 <span className="text-sm font-bold text-white leading-tight max-w-[80px] truncate">{offerB.name}</span>
-              </div>
-           </div>
-
-           {/* Center Arrow */}
-           <div className="flex flex-col items-center justify-center text-slate-700 group-hover:text-slate-500 transition-colors">
-              <ArrowRight size={24} strokeWidth={1.5} />
-           </div>
-
-           {/* Right (Depending on Type) */}
-           {trade.tradeType === 'FIXED' && reqB ? (
-             <div className="flex items-center gap-3 flex-row-reverse text-right">
-                <div className="relative">
-                   <BiscuitIcon biscuit={reqB} size="md" className="ring-2 ring-slate-800 group-hover:ring-slate-700 transition-all" />
-                   <div className="absolute -bottom-2 left-0 bg-slate-900 text-amber-500 text-[10px] font-bold px-1.5 py-0.5 rounded border border-slate-700 shadow-sm z-10">
-                     x{trade.requestQty}
-                   </div>
-                </div>
-                <div className="flex flex-col items-end">
-                   <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">You Get</span>
-                   <span className="text-sm font-bold text-white leading-tight max-w-[80px] truncate">{reqB.name}</span>
-                </div>
-             </div>
-           ) : (
-             <div className="flex flex-col items-end justify-center h-full">
-                <span className="text-3xl font-bold text-white">{bids.length}</span>
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Active Bids</span>
-             </div>
-           )}
-        </div>
-        
-        {/* Auction Bids Section */}
-        {trade.tradeType === 'AUCTION' && (
-           <div className="mb-4">
-              <button onClick={() => setShowBids(!showBids)} className="w-full text-xs text-purple-400 hover:text-purple-300 font-bold uppercase tracking-wider flex items-center justify-between bg-purple-500/10 px-3 py-2 rounded-lg border border-purple-500/20 mb-2">
-                 <span>{showBids ? "Hide Bids" : "View Bids"}</span>
-                 <Gavel size={14} />
-              </button>
-              
-              <AnimatePresence>
-              {showBids && (
-                <MotionDiv initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
-                   <div className="flex flex-col gap-2 max-h-40 overflow-y-auto custom-scrollbar p-1">
-                      {bids.length === 0 && <div className="text-center text-xs text-slate-500 italic py-2">No bids yet.</div>}
-                      {bids.map(bid => {
-                         const bidBiscuit = biscuits.find(b => b.id === bid.biscuitId);
-                         return (
-                            <div key={bid.id} className="flex justify-between items-center bg-slate-950 p-2 rounded border border-slate-800">
-                               <div className="flex items-center gap-2">
-                                  <span className="text-[10px] bg-slate-800 text-slate-400 px-1 rounded">{bid.bidderName}</span>
-                                  {bidBiscuit && (
-                                     <div className="flex items-center gap-1 text-xs text-white font-bold">
-                                        <span>{bid.qty}x</span>
-                                        <span>{bidBiscuit.name}</span>
-                                     </div>
-                                  )}
-                               </div>
-                               <button onClick={() => onAcceptBid(bid.id)} className="text-[10px] bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-1 rounded font-bold uppercase">Accept</button>
-                            </div>
-                         )
-                      })}
-                   </div>
-                </MotionDiv>
-              )}
-              </AnimatePresence>
-           </div>
-        )}
-
-        {/* Footer Action */}
-        <button 
-          onClick={onCancel}
-          className="w-full py-3 rounded-xl bg-slate-950 border border-slate-800 text-slate-400 text-xs font-bold uppercase tracking-widest hover:bg-red-900/10 hover:text-red-400 hover:border-red-900/30 transition-all flex items-center justify-center gap-2 group/btn mt-auto"
-        >
-          <X size={14} className="group-hover/btn:scale-110 transition-transform" /> Cancel Listing
-        </button>
-      </div>
-    </div>
-  )
-}
-
-const HistoryRow: React.FC<{
-  trade: P2PTrade;
-  biscuits: Biscuit[];
-  userId: string;
-}> = ({ trade, biscuits, userId }) => {
-  const offerB = biscuits.find(b => b.id === trade.offerBiscuitId);
-  const reqB = biscuits.find(b => b.id === trade.requestBiscuitId);
-  
-  if (!offerB || !reqB) return null;
-
-  const isCreator = trade.creatorId === userId;
-  
-  const gaveQty = isCreator ? trade.offerQty : trade.requestQty;
-  const gaveBiscuit = isCreator ? offerB : reqB;
-  
-  const gotQty = isCreator ? trade.requestQty : trade.offerQty;
-  const gotBiscuit = isCreator ? reqB : offerB;
-
-  const otherName = isCreator ? trade.takerName : trade.creatorName;
-
-  return (
-    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between hover:border-slate-700 transition-colors gap-4">
-      <div className="flex items-center gap-6">
-        <div className="flex items-center gap-3">
-             <div className="flex flex-col items-center gap-1">
-               <span className="text-[10px] font-black text-red-500 uppercase tracking-widest">Sent</span>
-               <BiscuitIcon biscuit={gaveBiscuit} size="sm" />
-             </div>
-             <span className="font-mono font-bold text-xl text-slate-300">-{gaveQty}</span>
-        </div>
-        
-        <ArrowRight size={16} className="text-slate-700" />
-        
-        <div className="flex items-center gap-3">
-             <span className="font-mono font-bold text-xl text-white">+{gotQty}</span>
-             <div className="flex flex-col items-center gap-1">
-               <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Received</span>
-               <BiscuitIcon biscuit={gotBiscuit} size="sm" />
-             </div>
-        </div>
-      </div>
-
-      <div className="text-right flex sm:flex-col items-center sm:items-end justify-between border-t sm:border-t-0 border-slate-800 pt-3 sm:pt-0">
-        <div className="text-sm text-slate-300 font-bold">Traded with <span className="text-amber-500">{otherName}</span></div>
-        <div className="text-[10px] text-slate-500 font-mono mt-1">{new Date(trade.createdAt).toLocaleString()}</div>
-      </div>
-    </div>
-  )
-}
-
-// --- Main Dashboard ---
-
 export const Dashboard: React.FC = () => {
-  const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'market' | 'my-trades' | 'history'>('market');
-  const [inventory, setInventory] = useState<InventoryItem[]>([]);
-  const [biscuits, setBiscuits] = useState<Biscuit[]>([]);
-  const [p2pTrades, setP2PTrades] = useState<P2PTrade[]>([]);
-  const [history, setHistory] = useState<P2PTrade[]>([]);
-  const [notification, setNotification] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
-
-  // Loading States
-  const [isProcessing, setIsProcessing] = useState(false);
-
-  // Confirmation State
-  const [confirmState, setConfirmState] = useState<{ isOpen: boolean, msg: string, onConfirm: () => void }>({ isOpen: false, msg: '', onConfirm: () => {} });
-
-  // Create Trade Form State
-  const [isCreating, setIsCreating] = useState(false);
-  const [createType, setCreateType] = useState<P2PTradeType>('FIXED');
-  const [offerBid, setOfferBid] = useState('');
-  const [offerQty, setOfferQty] = useState(1);
-  const [reqBid, setReqBid] = useState('');
-  const [reqQty, setReqQty] = useState(1);
-
-  // Restock State
-  const [isRestocking, setIsRestocking] = useState(false);
-  const [restockId, setRestockId] = useState('');
-  const [restockQty, setRestockQty] = useState(10);
-
-  // New Biscuit State
-  const [isCreatingBiscuit, setIsCreatingBiscuit] = useState(false);
-  const [newBiscuitName, setNewBiscuitName] = useState('');
-  const [newBiscuitBrand, setNewBiscuitBrand] = useState('');
-  const [newBiscuitIcon, setNewBiscuitIcon] = useState('');
-  const [newBiscuitColor, setNewBiscuitColor] = useState(BRAND_COLORS[0].class);
+  const { user, refreshUser } = useAuth();
   
+  // Data State
+  const [biscuits, setBiscuits] = useState<Biscuit[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [rules, setRules] = useState<ExchangeRule[]>([]);
+  const [p2pTrades, setP2PTrades] = useState<P2PTrade[]>([]);
+  
+  // UI State
+  const [activeTab, setActiveTab] = useState<'market' | 'p2p' | 'history'>('market');
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Modal State: Inventory
+  const [isRestocking, setIsRestocking] = useState(false);
+  const [manageMode, setManageMode] = useState<'add' | 'remove'>('add');
+  const [restockId, setRestockId] = useState<string>('');
+  const [restockQty, setRestockQty] = useState<number>(1);
+
+  // Modal State: Create Trade
+  const [isCreatingTrade, setIsCreatingTrade] = useState(false);
+  const [offerId, setOfferId] = useState('');
+  const [offerQty, setOfferQty] = useState(1);
+  const [reqId, setReqId] = useState('');
+  const [reqQty, setReqQty] = useState(1);
+  const [tradeType, setTradeType] = useState<'FIXED' | 'AUCTION'>('FIXED');
+
+  // Modal State: Create Biscuit (User)
+  const [isCreatingBiscuit, setIsCreatingBiscuit] = useState(false);
+  const [formName, setFormName] = useState('');
+  const [formBrand, setFormBrand] = useState('');
+  const [formColor, setFormColor] = useState(BRAND_COLORS[0].class);
+  const [formIcon, setFormIcon] = useState('🍪');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Data Loading Wrappers for Subscription
-  const fetchInventory = async () => { if(user) setInventory(await BackendService.getUserInventory(user.id)); }
-  const fetchTrades = async () => { setP2PTrades(await BackendService.getP2PTrades()); }
-  const fetchHistory = async () => { if(user) setHistory(await BackendService.getTradeHistory(user.id)); }
-  const fetchBiscuits = async () => { setBiscuits(await BackendService.getBiscuits()); }
+  // Confirmation
+  const [confirmState, setConfirmState] = useState<{ isOpen: boolean, msg: string, onConfirm: () => void, isDestructive?: boolean }>({ isOpen: false, msg: '', onConfirm: () => {} });
 
-  // Initial Load
+  // Initial Load & Realtime
   useEffect(() => {
     if (!user) return;
-    fetchInventory();
-    fetchTrades();
-    fetchHistory();
-    fetchBiscuits();
 
-    // REALTIME SUBSCRIPTION
+    const loadData = async () => {
+      const [b, i, r, t] = await Promise.all([
+        BackendService.getBiscuits(),
+        BackendService.getUserInventory(user.id),
+        BackendService.getRules(),
+        BackendService.getP2PTrades()
+      ]);
+      setBiscuits(b);
+      setInventory(i);
+      setRules(r.filter(x => x.isActive)); // Only active rules for users
+      setP2PTrades(t);
+      setIsLoading(false);
+    };
+    loadData();
+
+    // Subscriptions
     const channel = supabase.channel('dashboard_realtime')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory', filter: `user_id=eq.${user.id}` }, () => {
-            fetchInventory();
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'p2p_trades' }, () => {
-            fetchTrades();
-            fetchHistory(); // History might update on trade completion
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'biscuits' }, () => {
-            fetchBiscuits();
-        })
-        .subscribe();
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory', filter: `user_id=eq.${user.id}` }, () => {
+         BackendService.getUserInventory(user.id).then(setInventory);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'p2p_trades' }, () => {
+         BackendService.getP2PTrades().then(setP2PTrades);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'exchange_rules' }, () => {
+         BackendService.getRules().then(r => setRules(r.filter(x => x.isActive)));
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'biscuits' }, () => {
+         BackendService.getBiscuits().then(setBiscuits);
+      })
+      .subscribe();
 
-    return () => { supabase.removeChannel(channel); }
+    return () => { supabase.removeChannel(channel); };
   }, [user]);
 
-  const notify = (msg: string, type: 'success' | 'error') => {
-    setNotification({ msg, type });
-    setTimeout(() => setNotification(null), 3000);
-  };
-
-  // --- Handlers ---
-
-  const handleCreateTrade = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user || !offerBid || !reqBid) return;
-    
-    setIsProcessing(true);
-    try {
-      const res = await BackendService.createP2PTrade(user.id, offerBid, offerQty, reqBid, reqQty, createType);
-      if (res.success) {
-        notify(res.message, 'success');
-        setIsCreating(false);
-        setOfferQty(1); setReqQty(1); setOfferBid(''); setReqBid('');
-        setCreateType('FIXED');
-        // Immediate Update
-        fetchTrades();
-        fetchInventory();
-      } else {
-        notify(res.message, 'error');
-      }
-    } catch (e) {
-      notify('Transaction failed', 'error');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
+  // Helpers
+  const getBiscuit = (id: string) => biscuits.find(b => b.id === id);
+  const getQty = (id: string) => inventory.find(i => i.biscuitId === id)?.quantity || 0;
+  const biscuitOptions = biscuits.map(b => ({ value: b.id, label: b.name, icon: b.icon }));
+  
+  // Handlers
   const handleRestock = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !restockId) return;
 
-    setIsProcessing(true);
-    try {
-      await BackendService.adjustInventory(user.id, restockId, restockQty);
-      notify(`Added ${restockQty} packets to inventory`, 'success');
+    const delta = manageMode === 'add' ? restockQty : -restockQty;
+    const success = await BackendService.adjustInventory(user.id, restockId, delta);
+    
+    if (success) {
+      setRestockQty(1);
       setIsRestocking(false);
-      setRestockQty(10);
-      setRestockId('');
-      // Immediate Update
-      fetchInventory();
-    } catch(e) {
-      notify('Failed to update stash', 'error');
-    } finally {
-      setIsProcessing(false);
+      
+      // IMMEDIATE MANUAL REFRESH
+      const freshInventory = await BackendService.getUserInventory(user.id);
+      setInventory(freshInventory);
+      
+    } else {
+      alert("Failed to update inventory. Check if you have enough stock to remove.");
     }
+  };
+
+  const executeRule = async (ruleId: string) => {
+    if (!user) return;
+    const rule = rules.find(r => r.id === ruleId);
+    if (!rule) return;
+
+    if (getQty(rule.fromBiscuitId) < rule.fromQty) {
+      alert("Not enough biscuits!");
+      return;
+    }
+
+    const deduct = await BackendService.adjustInventory(user.id, rule.fromBiscuitId, -rule.fromQty);
+    if (deduct) {
+      await BackendService.adjustInventory(user.id, rule.toBiscuitId, rule.toQty);
+      const freshInventory = await BackendService.getUserInventory(user.id);
+      setInventory(freshInventory);
+    } else {
+       alert("Transaction failed.");
+    }
+  };
+
+  const handleCreateTrade = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !offerId) return;
+
+    // Handle "Any" logic for auction: if reqId is 'any', use first biscuit as placeholder or handle in backend
+    // Since DB requires NOT NULL, we use the first biscuit or the offer biscuit as a placeholder if 'any' is selected.
+    // In a real app, we'd change schema to allow NULL request_biscuit_id
+    let finalReqId = reqId;
+    if (tradeType === 'AUCTION' && reqId === 'any') {
+        // Use offerId as placeholder if "Any" is selected to satisfy DB constraint
+        finalReqId = biscuits[0]?.id || offerId; 
+    }
+
+    if (!finalReqId) return;
+
+    const res = await BackendService.createP2PTrade(user.id, offerId, offerQty, finalReqId, reqQty, tradeType);
+    if (res.success) {
+      setIsCreatingTrade(false);
+      setOfferQty(1);
+      setReqQty(1);
+      setOfferId('');
+      setReqId('');
+      
+      const [freshInv, freshTrades] = await Promise.all([
+        BackendService.getUserInventory(user.id),
+        BackendService.getP2PTrades()
+      ]);
+      setInventory(freshInv);
+      setP2PTrades(freshTrades);
+      
+    } else {
+      alert(res.message);
+    }
+  };
+
+  const handleAcceptTrade = (trade: P2PTrade) => {
+    if (!user) return;
+    setConfirmState({
+      isOpen: true,
+      msg: `Accept this trade? You will give ${trade.requestQty} ${getBiscuit(trade.requestBiscuitId)?.name} and receive ${trade.offerQty} ${getBiscuit(trade.offerBiscuitId)?.name}.`,
+      onConfirm: async () => {
+         const res = await BackendService.acceptP2PTrade(trade.id, user.id);
+         if (!res.success) alert(res.message);
+         else {
+             const [freshInv, freshTrades] = await Promise.all([
+                BackendService.getUserInventory(user.id),
+                BackendService.getP2PTrades()
+             ]);
+             setInventory(freshInv);
+             setP2PTrades(freshTrades);
+         }
+      }
+    });
+  };
+
+  const handleCancelTrade = (trade: P2PTrade) => {
+    if (!user) return;
+    setConfirmState({
+      isOpen: true,
+      msg: "Cancel this trade? Your items will be refunded.",
+      isDestructive: true,
+      onConfirm: async () => {
+        const res = await BackendService.cancelP2PTrade(trade.id, user.id);
+        if (!res.success) alert(res.message);
+        else {
+             const [freshInv, freshTrades] = await Promise.all([
+                BackendService.getUserInventory(user.id),
+                BackendService.getP2PTrades()
+             ]);
+             setInventory(freshInv);
+             setP2PTrades(freshTrades);
+        }
+      }
+    });
+  };
+  
+  const handleConfirmTrade = async (trade: P2PTrade) => {
+      if (!user) return;
+      await BackendService.confirmP2PTrade(trade.id, user.id);
+  };
+
+  // --- NEW BISCUIT LOGIC ---
+  const openCreateBiscuit = () => {
+    setFormName('');
+    setFormBrand('');
+    setFormColor(BRAND_COLORS[0].class);
+    setFormIcon('🍪');
+    setIsCreatingBiscuit(true);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 2 * 1024 * 1024) { 
-        notify('Image too large (Max 2MB)', 'error');
-        return;
-      }
       const reader = new FileReader();
       reader.onload = (e) => {
-        const result = e.target?.result as string;
-        setNewBiscuitIcon(result);
+        setFormIcon(e.target?.result as string);
       };
       reader.readAsDataURL(file);
     }
   };
 
-  const handleCreateBiscuit = async (e: React.FormEvent) => {
+  const handleBiscuitSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
-    if (!newBiscuitName.trim() || !newBiscuitBrand.trim() || !newBiscuitIcon) {
-      notify("All fields are required.", "error");
-      return;
-    }
     
-    setIsProcessing(true);
-    try {
-      const result = await BackendService.createBiscuit(user.id, newBiscuitName, newBiscuitBrand, newBiscuitIcon, newBiscuitColor);
-      if (result.success && result.data) {
-        notify(`${result.data.name} created (+10 packets added)`, 'success');
+    if (!formName || !formBrand) {
+        alert("Name and Brand are required.");
+        return;
+    }
+
+    const res = await BackendService.createBiscuit(user.id, formName, formBrand, formIcon || '🍪', formColor);
+    if (res.success) {
         setIsCreatingBiscuit(false);
-        setNewBiscuitName(''); setNewBiscuitBrand(''); setNewBiscuitIcon('');
-        setNewBiscuitColor(BRAND_COLORS[0].class);
-        // Immediate Update
-        fetchBiscuits();
-        fetchInventory();
-      } else {
-        notify(result.error || 'Failed to create biscuit.', 'error');
-      }
-    } catch (e) {
-      notify('Error creating biscuit.', 'error');
-    } finally {
-      setIsProcessing(false); 
+        setBiscuits(await BackendService.getBiscuits());
+    } else {
+        alert(res.error);
     }
   };
 
-  // Trade Actions with Custom Confirm
-  const handleAccept = (tradeId: string) => {
-    if (!user) return;
-    setConfirmState({
-      isOpen: true,
-      msg: "Are you sure you want to accept this trade? Your biscuits will be reserved until the deal is complete.",
-      onConfirm: async () => {
-        setIsProcessing(true);
-        try {
-          const res = await BackendService.acceptP2PTrade(tradeId, user.id);
-          notify(res.message, res.success ? 'success' : 'error');
-          if (res.success) {
-            fetchTrades();
-            fetchInventory();
-          }
-        } finally {
-          setIsProcessing(false);
-        }
-      }
-    });
-  };
+  // Derived Lists
+  const activeP2P = p2pTrades.filter(t => t.status === 'OPEN' && t.creatorId !== user?.id);
+  const myActiveTrades = p2pTrades.filter(t => (t.creatorId === user?.id || t.takerId === user?.id) && t.status !== 'CANCELLED');
 
-  const handlePlaceBid = (tradeId: string, biscuitId: string, qty: number) => {
-    if (!user) return;
-    setConfirmState({
-      isOpen: true,
-      msg: `Place bid of ${qty} packets? This will reserve them from your inventory until the auction ends.`,
-      onConfirm: async () => {
-        setIsProcessing(true);
-        try {
-          const res = await BackendService.placeBid(tradeId, user.id, biscuitId, qty);
-          notify(res.message, res.success ? 'success' : 'error');
-          if (res.success) fetchInventory();
-        } finally {
-          setIsProcessing(false);
-        }
-      }
-    });
-  };
-
-  const handleAcceptBid = (bidId: string, tradeId: string) => {
-    if (!user) return;
-    setConfirmState({
-      isOpen: true,
-      msg: "Accept this bid? All other bids will be refunded and trade will move to confirmation.",
-      onConfirm: async () => {
-         setIsProcessing(true);
-         try {
-           const res = await BackendService.acceptBid(tradeId, bidId, user.id);
-           notify(res.message, res.success ? 'success' : 'error');
-           if (res.success) {
-              fetchTrades();
-           }
-         } finally {
-           setIsProcessing(false);
-         }
-      }
-    })
-  }
-
-  const handleConfirm = async (tradeId: string) => {
-    if (!user) return;
-    setIsProcessing(true);
-    try {
-      const res = await BackendService.confirmP2PTrade(tradeId, user.id);
-      notify(res.message, res.success ? 'success' : 'error');
-      if (res.success) {
-        fetchTrades();
-        fetchHistory();
-        fetchInventory();
-      }
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleCancel = (tradeId: string) => {
-    if (!user) return;
-    setConfirmState({
-      isOpen: true,
-      msg: "Cancel this listing? Your items (and any bids) will be refunded.",
-      onConfirm: async () => {
-        setIsProcessing(true);
-        try {
-          const res = await BackendService.cancelP2PTrade(tradeId, user.id);
-          notify(res.message, res.success ? 'success' : 'error');
-          if (res.success) {
-            fetchTrades();
-            fetchInventory();
-          }
-        } finally {
-          setIsProcessing(false);
-        }
-      }
-    });
-  };
-
-  const getBiscuit = (id: string) => biscuits.find(b => b.id === id);
-  const biscuitOptions = biscuits.map(b => ({ value: b.id, label: b.name, icon: b.icon }));
-
-  // Derived State
-  const openTrades = p2pTrades.filter(t => t.status === 'OPEN' && t.creatorId !== user?.id);
-  const myActionRequired = p2pTrades.filter(t => {
-    if (t.status !== 'PENDING') return false;
-    const isMe = t.creatorId === user?.id || t.takerId === user?.id;
-    if (!isMe) return false;
-    if (t.creatorId === user?.id && !t.creatorConfirmed) return true;
-    if (t.takerId === user?.id && !t.takerConfirmed) return true;
-    return false;
-  });
-  const myPendingOthers = p2pTrades.filter(t => {
-    if (t.status !== 'PENDING') return false;
-    const isMe = t.creatorId === user?.id || t.takerId === user?.id;
-    if (!isMe) return false;
-    if (t.creatorId === user?.id && t.creatorConfirmed) return true;
-    if (t.takerId === user?.id && t.takerConfirmed) return true;
-    return false;
-  });
-  const myListings = p2pTrades.filter(t => t.status === 'OPEN' && t.creatorId === user?.id);
+  // Options for Auction (Include "Any")
+  const auctionRequestOptions = [
+    { value: 'any', label: 'Any / Surprise Me', icon: '🎁' },
+    ...biscuitOptions
+  ];
 
   return (
-    <div className="space-y-8 pb-20 relative">
-      
-      {/* --- MODALS --- */}
-
-      {/* Loading Overlay */}
-      <AnimatePresence>
-        {isProcessing && (
-           <MotionDiv 
-             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-             className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-[100] flex items-center justify-center"
-           >
-             <div className="bg-slate-900 border border-slate-700 p-8 rounded-2xl shadow-2xl flex flex-col items-center gap-4">
-               <Loader2 className="animate-spin text-amber-500" size={40} />
-               <span className="text-white font-bold text-sm tracking-wide uppercase">Processing...</span>
-             </div>
-           </MotionDiv>
-        )}
-      </AnimatePresence>
-
-      {/* Confirm Modal */}
+    <div className="space-y-8 pb-20">
       <ConfirmModal 
-        isOpen={confirmState.isOpen}
-        message={confirmState.msg}
-        onConfirm={confirmState.onConfirm}
-        onCancel={() => setConfirmState(prev => ({ ...prev, isOpen: false }))}
+        isOpen={confirmState.isOpen} 
+        message={confirmState.msg} 
+        onConfirm={confirmState.onConfirm} 
+        onCancel={() => setConfirmState({...confirmState, isOpen: false})} 
+        isDestructive={confirmState.isDestructive}
       />
 
-      {/* Restock Modal */}
+      {/* Header & Inventory Strip */}
+      <section>
+        <div className="flex justify-between items-end mb-4">
+           <div>
+             <h2 className="text-2xl font-bold text-white tracking-tight">Trading Floor</h2>
+             <p className="text-slate-500 text-sm">Real-time biscuit exchange.</p>
+           </div>
+           <div className="flex gap-2">
+             <button 
+                onClick={openCreateBiscuit}
+                className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-lg text-xs font-bold transition-colors border border-slate-700"
+              >
+                <Plus size={16} /> Add New Item
+             </button>
+             <button 
+               onClick={() => setIsRestocking(true)}
+               className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-lg text-xs font-bold transition-colors border border-slate-700"
+             >
+               <Package size={16} /> Manage Stash
+             </button>
+           </div>
+        </div>
+
+        {/* Inventory Scroll */}
+        <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
+          {biscuits.map(b => {
+             const qty = getQty(b.id);
+             return (
+               <div key={b.id} className={clsx("flex-shrink-0 bg-slate-900 border rounded-xl p-3 w-32 flex flex-col items-center gap-2 transition-all", qty > 0 ? "border-slate-700 opacity-100" : "border-slate-800 opacity-50")}>
+                  <div className="relative">
+                    <BiscuitIcon biscuit={b} size="sm" />
+                    <span className="absolute -top-1 -right-1 bg-slate-800 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-slate-600">{qty}</span>
+                  </div>
+                  <span className="text-xs font-bold text-slate-400 truncate w-full text-center">{b.name}</span>
+               </div>
+             );
+          })}
+        </div>
+      </section>
+
+      {/* Main Tabs */}
+      <div className="flex border-b border-slate-800 mb-6 bg-slate-900/50 rounded-t-xl overflow-hidden">
+        {[
+          { id: 'market', label: 'Fixed Exchange', icon: RefreshCcw },
+          { id: 'p2p', label: 'P2P Market', icon: ShoppingBag },
+          { id: 'history', label: 'My Trades', icon: History },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id as any)}
+            className={clsx(
+              "flex-1 py-4 text-sm font-semibold flex items-center justify-center gap-2 transition-all border-b-2",
+              activeTab === tab.id 
+                ? "border-amber-500 text-white bg-slate-800" 
+                : "border-transparent text-slate-500 hover:text-slate-300 hover:bg-slate-800/50"
+            )}
+          >
+            <tab.icon size={16} /> {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Content Area */}
+      <div>
+        {activeTab === 'market' && (
+           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+             {rules.map(rule => {
+                const fromB = getBiscuit(rule.fromBiscuitId);
+                const toB = getBiscuit(rule.toBiscuitId);
+                if (!fromB || !toB) return null;
+                return (
+                  <TradeCard 
+                    key={rule.id}
+                    rule={rule}
+                    fromBiscuit={fromB}
+                    toBiscuit={toB}
+                    userBalance={getQty(rule.fromBiscuitId)}
+                    onTrade={executeRule}
+                  />
+                );
+             })}
+             {rules.length === 0 && (
+                <div className="col-span-full text-center py-12 text-slate-500">
+                  <RefreshCcw size={32} className="mx-auto mb-3 opacity-50" />
+                  <p>No fixed exchange rules active.</p>
+                </div>
+             )}
+           </div>
+        )}
+
+        {activeTab === 'p2p' && (
+           <div>
+              <div className="flex justify-end mb-4">
+                 <button 
+                   onClick={() => setIsCreatingTrade(true)}
+                   className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white px-5 py-2.5 rounded-lg text-sm font-bold shadow-lg shadow-amber-900/20 active:scale-95 transition-all"
+                 >
+                   <Plus size={16} /> Create Offer
+                 </button>
+              </div>
+              <div className="space-y-4">
+                 {activeP2P.map(trade => {
+                    const offerB = getBiscuit(trade.offerBiscuitId);
+                    const reqB = getBiscuit(trade.requestBiscuitId);
+                    if (!offerB || !reqB) return null;
+                    const canAfford = getQty(trade.requestBiscuitId) >= trade.requestQty;
+
+                    return (
+                      <div key={trade.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+                         <div className="flex items-center gap-6 flex-1">
+                            <div className="flex flex-col items-center">
+                               <BiscuitIcon biscuit={offerB} size="sm" />
+                               <span className="text-xs font-bold mt-1 text-slate-400">x{trade.offerQty}</span>
+                            </div>
+                            <ArrowRight className="text-slate-600" />
+                            <div className="flex flex-col items-center">
+                               <BiscuitIcon biscuit={reqB} size="sm" />
+                               <span className="text-xs font-bold mt-1 text-amber-500">x{trade.requestQty}</span>
+                            </div>
+                            <div className="ml-4 border-l border-slate-800 pl-6">
+                               <div className="text-sm font-bold text-white">{trade.creatorName}</div>
+                               <div className="text-xs text-slate-500 uppercase tracking-wider font-bold mt-0.5">{trade.tradeType} TRADE</div>
+                            </div>
+                         </div>
+                         <button 
+                           onClick={() => handleAcceptTrade(trade)}
+                           disabled={!canAfford}
+                           className={clsx(
+                             "px-6 py-3 rounded-lg font-bold text-xs uppercase tracking-wide transition-all min-w-[120px]",
+                             canAfford 
+                               ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20" 
+                               : "bg-slate-800 text-slate-500 cursor-not-allowed"
+                           )}
+                         >
+                            {canAfford ? "Accept" : "Need Stock"}
+                         </button>
+                      </div>
+                    );
+                 })}
+                 {activeP2P.length === 0 && (
+                    <div className="text-center py-12 text-slate-500">
+                      <ShoppingBag size={32} className="mx-auto mb-3 opacity-50" />
+                      <p>No active P2P offers. Be the first!</p>
+                    </div>
+                 )}
+              </div>
+           </div>
+        )}
+
+        {activeTab === 'history' && (
+           <div className="space-y-4">
+              {myActiveTrades.sort((a,b) => b.createdAt - a.createdAt).map(trade => {
+                 const offerB = getBiscuit(trade.offerBiscuitId);
+                 const reqB = getBiscuit(trade.requestBiscuitId);
+                 if (!offerB || !reqB) return null;
+                 
+                 const isCreator = trade.creatorId === user?.id;
+                 const statusColor = trade.status === 'COMPLETED' ? 'text-emerald-400' : trade.status === 'CANCELLED' ? 'text-red-400' : 'text-amber-400';
+                 const needsMyConfirm = trade.status === 'PENDING' && ((isCreator && !trade.creatorConfirmed) || (!isCreator && !trade.takerConfirmed));
+                 const waitingPartner = trade.status === 'PENDING' && ((isCreator && trade.creatorConfirmed) || (!isCreator && trade.takerConfirmed));
+
+                 return (
+                    <div key={trade.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+                        <div className="flex items-center gap-4 text-sm text-slate-400 flex-1">
+                           <span className={clsx("text-[10px] font-bold uppercase px-2 py-0.5 rounded border border-slate-700 bg-slate-800", statusColor)}>{trade.status}</span>
+                           <span className="text-xs text-slate-500">{new Date(trade.createdAt).toLocaleDateString()}</span>
+                           
+                           <div className="flex items-center gap-2">
+                             <span>{isCreator ? "You offered" : `${trade.creatorName} offered`}</span>
+                             <span className="font-bold text-white">{trade.offerQty} {offerB.name}</span>
+                             <ArrowRight size={12} />
+                             <span>for</span>
+                             <span className="font-bold text-white">{trade.requestQty} {reqB.name}</span>
+                           </div>
+                        </div>
+
+                        <div className="flex gap-2">
+                           {trade.status === 'OPEN' && isCreator && (
+                              <button onClick={() => handleCancelTrade(trade)} className="text-xs font-bold text-red-400 hover:text-red-300 bg-red-500/10 px-3 py-1.5 rounded border border-red-500/20">Cancel Offer</button>
+                           )}
+                           
+                           {needsMyConfirm && (
+                              <button onClick={() => handleConfirmTrade(trade)} className="flex items-center gap-2 text-xs font-bold text-emerald-950 bg-emerald-500 hover:bg-emerald-400 px-4 py-2 rounded shadow-lg shadow-emerald-500/20 animate-pulse">
+                                <CheckCircle size={14}/> Confirm Receipt
+                              </button>
+                           )}
+                           
+                           {waitingPartner && (
+                              <span className="text-xs font-bold text-slate-500 italic flex items-center gap-2"><Loader2 size={12} className="animate-spin"/> Partner Confirming...</span>
+                           )}
+                        </div>
+                    </div>
+                 );
+              })}
+              {myActiveTrades.length === 0 && (
+                <div className="text-center py-12 text-slate-500">
+                   <p>No trade history found.</p>
+                </div>
+              )}
+           </div>
+        )}
+      </div>
+
+      {/* --- MODALS --- */}
+
+      {/* Inventory Modal */}
       <Modal 
         isOpen={isRestocking} 
         onClose={() => setIsRestocking(false)} 
-        title="Add Inventory" 
-        icon={<PackagePlus className="text-amber-500" />}
+        title="Manage Inventory" 
+        icon={<Package className="text-amber-500" />}
       >
         <form onSubmit={handleRestock} className="space-y-6">
+          <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800 mb-6">
+             <button
+               type="button"
+               onClick={() => setManageMode('add')}
+               className={clsx("flex-1 py-2 text-xs font-bold uppercase rounded-md transition-all flex items-center justify-center gap-2", manageMode === 'add' ? "bg-emerald-600 text-white shadow" : "text-slate-500 hover:text-slate-300")}
+             >
+               <Plus size={14} /> Add Stock
+             </button>
+             <button
+               type="button"
+               onClick={() => setManageMode('remove')}
+               className={clsx("flex-1 py-2 text-xs font-bold uppercase rounded-md transition-all flex items-center justify-center gap-2", manageMode === 'remove' ? "bg-red-600 text-white shadow" : "text-slate-500 hover:text-slate-300")}
+             >
+               <Minus size={14} /> Remove Stock
+             </button>
+          </div>
+
           <div>
             <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2 tracking-wider">Biscuit Type</label>
             <CustomSelect 
@@ -773,395 +524,218 @@ export const Dashboard: React.FC = () => {
           </div>
           <div>
             <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2 tracking-wider">Quantity</label>
-            <div className="relative">
-              <input 
-                type="number" min="1" max="1000"
-                value={restockQty} 
-                onChange={e => setRestockQty(parseInt(e.target.value))} 
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-amber-500 outline-none text-sm font-mono" 
-              />
-              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-600 text-xs font-bold">PACKETS</span>
+            <div className="flex items-center gap-3">
+              <button 
+                type="button" 
+                onClick={() => setRestockQty(Math.max(1, restockQty - 1))}
+                className="h-11 w-11 flex items-center justify-center bg-slate-800 border border-slate-700 rounded-lg text-slate-400 hover:text-white hover:border-slate-600 transition-all active:scale-95"
+              >
+                <Minus size={20} />
+              </button>
+              <div className="relative flex-1">
+                <input 
+                  type="number" min="1" max="1000"
+                  value={restockQty} 
+                  onChange={e => {
+                    const val = parseInt(e.target.value);
+                    setRestockQty(isNaN(val) ? 0 : val);
+                  }} 
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-amber-500 outline-none text-lg font-mono text-center font-bold" 
+                />
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-600 text-[10px] font-bold tracking-wider pointer-events-none">PKTS</span>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setRestockQty(restockQty + 1)}
+                className="h-11 w-11 flex items-center justify-center bg-slate-800 border border-slate-700 rounded-lg text-slate-400 hover:text-white hover:border-slate-600 transition-all active:scale-95"
+              >
+                <Plus size={20} />
+              </button>
             </div>
           </div>
-          <button type="submit" disabled={!restockId} className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-sm shadow-lg shadow-emerald-900/20 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed">
-            Update Stash
+          <button 
+             type="submit" 
+             disabled={!restockId} 
+             className={clsx(
+               "w-full py-3 rounded-lg font-bold text-sm shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed text-white",
+               manageMode === 'add' ? "bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/20" : "bg-red-600 hover:bg-red-500 shadow-red-900/20"
+             )}
+          >
+            {manageMode === 'add' ? 'Confirm Addition' : 'Confirm Removal'}
           </button>
         </form>
       </Modal>
 
-      {/* New Biscuit Modal */}
+      {/* Create Trade Modal (Re-Designed) */}
+      <Modal 
+        isOpen={isCreatingTrade} 
+        onClose={() => setIsCreatingTrade(false)} 
+        title="New Listing" 
+        icon={<RefreshCw className="text-amber-500"/>}
+        maxWidth="max-w-4xl"
+      >
+         <form onSubmit={handleCreateTrade} className="space-y-6">
+            {/* Header Tabs */}
+            <div className="flex gap-4">
+               <button 
+                 type="button"
+                 onClick={() => setTradeType('FIXED')}
+                 className={clsx(
+                   "flex-1 py-3 text-sm font-bold uppercase tracking-wide rounded-lg border transition-all flex items-center justify-center gap-2",
+                   tradeType === 'FIXED' 
+                     ? "bg-slate-800 border-slate-600 text-white shadow-lg" 
+                     : "bg-slate-950/50 border-slate-800 text-slate-500 hover:text-slate-300"
+                 )}
+               >
+                 <RefreshCcw size={16} /> Fixed Price
+               </button>
+               <button 
+                 type="button"
+                 onClick={() => setTradeType('AUCTION')}
+                 className={clsx(
+                   "flex-1 py-3 text-sm font-bold uppercase tracking-wide rounded-lg border transition-all flex items-center justify-center gap-2",
+                   tradeType === 'AUCTION' 
+                     ? "bg-gradient-to-r from-purple-600 to-pink-600 border-transparent text-white shadow-lg shadow-purple-900/20" 
+                     : "bg-slate-950/50 border-slate-800 text-slate-500 hover:text-slate-300"
+                 )}
+               >
+                 <Gavel size={16} /> Auction
+               </button>
+            </div>
+
+            {/* Horizontal Layout */}
+            <div className="flex flex-col md:flex-row items-center gap-4">
+               {/* Left: YOU GIVE */}
+               <div className="flex-1 w-full space-y-2 p-5 bg-slate-950 rounded-xl border border-slate-800">
+                  <span className="text-[10px] uppercase font-bold text-emerald-500 flex items-center gap-1.5 mb-2">
+                    <ArrowRight size={12} className="rotate-180" /> You Give
+                  </span>
+                  
+                  <div className="flex items-center gap-3">
+                     <div className="flex-1">
+                        <CustomSelect value={offerId} onChange={setOfferId} options={biscuitOptions} placeholder="Select Item"/>
+                     </div>
+                  </div>
+                  
+                  <div className="flex items-center border border-slate-700 rounded-lg bg-slate-900 mt-3 h-11">
+                    <button type="button" onClick={() => setOfferQty(Math.max(1, offerQty - 1))} className="w-10 h-full flex items-center justify-center text-slate-400 hover:text-white border-r border-slate-700 active:bg-slate-800 rounded-l-lg transition-colors"><Minus size={16}/></button>
+                    <input 
+                      type="number" min="1" 
+                      value={offerQty} 
+                      onChange={e => setOfferQty(Math.max(1, parseInt(e.target.value) || 0))} 
+                      className="flex-1 bg-transparent text-center text-white font-bold font-mono outline-none"
+                    />
+                    <button type="button" onClick={() => setOfferQty(offerQty + 1)} className="w-10 h-full flex items-center justify-center text-slate-400 hover:text-white border-l border-slate-700 active:bg-slate-800 rounded-r-lg transition-colors"><Plus size={16}/></button>
+                  </div>
+               </div>
+               
+               {/* Center Arrow */}
+               <div className="flex items-center justify-center text-slate-600 shrink-0">
+                  <ArrowRight className="hidden md:block text-slate-500" size={28} />
+                  <ArrowRight className="block md:hidden rotate-90 text-slate-500" size={28} />
+               </div>
+
+               {/* Right: YOU GET / PREFERRED */}
+               <div className="flex-1 w-full space-y-2 p-5 bg-slate-950 rounded-xl border border-slate-800">
+                  <span className={clsx(
+                      "text-[10px] uppercase font-bold flex items-center gap-1.5 mb-2",
+                      tradeType === 'AUCTION' ? "text-purple-400" : "text-amber-500"
+                  )}>
+                    <ArrowRight size={12} /> {tradeType === 'AUCTION' ? "Preferred (Optional)" : "You Get"}
+                  </span>
+                  
+                  <div className="flex items-center gap-3">
+                     <div className="flex-1">
+                        <CustomSelect 
+                           value={reqId} 
+                           onChange={setReqId} 
+                           options={tradeType === 'AUCTION' ? auctionRequestOptions : biscuitOptions} 
+                           placeholder={tradeType === 'AUCTION' ? "Any or Select..." : "Select Item"}
+                        />
+                     </div>
+                  </div>
+
+                  <div className="flex items-center border border-slate-700 rounded-lg bg-slate-900 mt-3 h-11">
+                    <button type="button" onClick={() => setReqQty(Math.max(1, reqQty - 1))} className="w-10 h-full flex items-center justify-center text-slate-400 hover:text-white border-r border-slate-700 active:bg-slate-800 rounded-l-lg transition-colors"><Minus size={16}/></button>
+                    <input 
+                      type="number" min="1" 
+                      value={reqQty} 
+                      onChange={e => setReqQty(Math.max(1, parseInt(e.target.value) || 0))} 
+                      className="flex-1 bg-transparent text-center text-white font-bold font-mono outline-none"
+                    />
+                    <button type="button" onClick={() => setReqQty(reqQty + 1)} className="w-10 h-full flex items-center justify-center text-slate-400 hover:text-white border-l border-slate-700 active:bg-slate-800 rounded-r-lg transition-colors"><Plus size={16}/></button>
+                  </div>
+               </div>
+            </div>
+
+            <button 
+              type="submit" 
+              disabled={!offerId || (tradeType === 'FIXED' && !reqId)} 
+              className={clsx(
+                "w-full font-bold py-4 rounded-lg shadow-lg transition-all text-sm uppercase tracking-wide",
+                tradeType === 'AUCTION' 
+                   ? "bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white" 
+                   : "bg-amber-600 hover:bg-amber-500 text-white"
+              )}
+            >
+              {tradeType === 'AUCTION' ? "Start Auction" : "Post Fixed Trade"}
+            </button>
+         </form>
+      </Modal>
+
+      {/* Add New Biscuit Modal (User) */}
       <Modal 
         isOpen={isCreatingBiscuit} 
         onClose={() => setIsCreatingBiscuit(false)} 
-        title="Define New Biscuit"
-        icon={<Cookie className="text-purple-500" />}
+        title="Add New Biscuit" 
+        icon={<Cookie className="text-amber-500" />}
       >
-        <form onSubmit={handleCreateBiscuit} className="space-y-5">
+        <form onSubmit={handleBiscuitSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2 tracking-wider">Name</label>
-              <input 
-                required type="text" placeholder="e.g. Tim Tam"
-                value={newBiscuitName} 
-                onChange={e => setNewBiscuitName(e.target.value)} 
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-white focus:border-purple-500 outline-none text-sm"
-              />
+              <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Name</label>
+              <input value={formName} onChange={e => setFormName(e.target.value)} placeholder="e.g. Bourbon" className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm focus:border-amber-500 outline-none" required />
             </div>
             <div>
-              <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2 tracking-wider">Brand</label>
-              <input 
-                required type="text" placeholder="e.g. Arnotts"
-                value={newBiscuitBrand} 
-                onChange={e => setNewBiscuitBrand(e.target.value)} 
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-white focus:border-purple-500 outline-none text-sm"
-              />
+              <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Brand</label>
+              <input value={formBrand} onChange={e => setFormBrand(e.target.value)} placeholder="e.g. Britannia" className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm focus:border-amber-500 outline-none" required />
             </div>
           </div>
-
           <div>
-            <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2 tracking-wider">Biscuit Image</label>
-            <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept="image/*" className="hidden" />
-            
-            <div className="flex items-center gap-4">
-              <button 
-                type="button" 
-                onClick={() => fileInputRef.current?.click()}
-                className={clsx(
-                  "flex-1 py-3 px-4 border border-dashed rounded-xl transition-all flex items-center justify-center gap-2 group",
-                   newBiscuitIcon ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-400" : "border-slate-600 hover:border-slate-500 text-slate-400 hover:text-slate-300 bg-slate-950"
-                )}
-              >
-                {newBiscuitIcon ? (
-                  <>
-                     <Check size={16} /> Image Selected
-                  </>
-                ) : (
-                  <>
-                     <Upload size={16} className="group-hover:scale-110 transition-transform"/> 
-                     <span className="text-xs font-bold uppercase tracking-wide">Upload Photo</span>
-                  </>
-                )}
-              </button>
-              
-              {newBiscuitIcon && (
-                <div className="relative w-12 h-12 rounded-lg overflow-hidden border border-slate-700 shrink-0">
-                   <img src={newBiscuitIcon} className="w-full h-full object-cover" alt="Preview" />
-                   <button 
-                     type="button"
-                     onClick={() => { setNewBiscuitIcon(''); if(fileInputRef.current) fileInputRef.current.value = ''; }}
-                     className="absolute inset-0 bg-black/60 opacity-0 hover:opacity-100 flex items-center justify-center text-white transition-opacity"
-                   >
-                     <X size={16} />
-                   </button>
-                </div>
-              )}
-            </div>
+            <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Icon / Image</label>
+             <div className="flex items-center gap-3">
+               <div className="w-12 h-12 bg-slate-800 rounded-lg flex items-center justify-center overflow-hidden border border-slate-700">
+                  {formIcon && (formIcon.startsWith('http') || formIcon.startsWith('data:')) ? <img src={formIcon} className="w-full h-full object-cover"/> : <span className="text-2xl">{formIcon || '🍪'}</span>}
+               </div>
+               <div className="flex-1 flex gap-2">
+                 <button type="button" onClick={() => fileInputRef.current?.click()} className="flex-1 text-xs bg-slate-800 hover:bg-slate-700 px-3 py-2 rounded border border-slate-700 text-white flex items-center justify-center gap-2"><Upload size={14}/> Upload Image</button>
+               </div>
+               <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept="image/*" />
+             </div>
           </div>
-
           <div>
-            <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2 tracking-wider">Brand Color</label>
+            <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Color Tag</label>
             <div className="flex flex-wrap gap-2">
-              {BRAND_COLORS.map((color) => (
-                <button
-                  key={color.name}
-                  type="button"
-                  onClick={() => setNewBiscuitColor(color.class)}
+              {BRAND_COLORS.map(c => (
+                <button 
+                  type="button" 
+                  key={c.name} 
+                  onClick={() => setFormColor(c.class)} 
                   className={clsx(
-                    "w-8 h-8 rounded-full border-2 transition-transform hover:scale-110",
-                    color.class,
-                    newBiscuitColor === color.class ? "border-white scale-110 shadow-lg" : "border-transparent opacity-60 hover:opacity-100"
-                  )}
-                  title={color.name}
+                    "w-8 h-8 rounded-full border-2 transition-transform", 
+                    c.class, 
+                    formColor === c.class ? "border-white scale-110 shadow-lg" : "border-transparent opacity-50 hover:opacity-100 hover:scale-105"
+                  )} 
                 />
               ))}
             </div>
           </div>
-
-          <button 
-            type="submit" 
-            disabled={!newBiscuitName || !newBiscuitBrand || !newBiscuitIcon}
-            className={clsx(
-              "w-full py-3 rounded-lg font-bold text-sm shadow-lg transition-all flex items-center justify-center gap-2 active:scale-[0.98]",
-              (!newBiscuitName || !newBiscuitBrand || !newBiscuitIcon) 
-                ? "bg-slate-800 text-slate-500 cursor-not-allowed"
-                : "bg-purple-600 hover:bg-purple-500 text-white shadow-purple-900/20"
-            )}
-          >
-            Create Biscuit Type
+          <button type="submit" className="w-full py-3 bg-amber-600 hover:bg-amber-500 rounded-lg text-white font-bold text-sm shadow-lg shadow-amber-900/20 active:scale-[0.98]">
+            Create Biscuit
           </button>
         </form>
       </Modal>
 
-      {/* --- DASHBOARD CONTENT --- */}
-
-      <div className="flex flex-col gap-6">
-        {/* Header */}
-        <div className="flex justify-between items-end">
-          <div>
-            <h2 className="text-3xl font-bold text-white tracking-tight">My Stash</h2>
-            <p className="text-slate-400 text-sm mt-1">Real-time inventory valuation.</p>
-          </div>
-          <div className="flex items-center gap-2 md:gap-4">
-             <button 
-               onClick={() => setIsCreatingBiscuit(true)}
-               className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-purple-500/50 text-slate-300 hover:text-purple-400 text-xs font-bold uppercase tracking-wider rounded-lg transition-all shadow-sm"
-             >
-               <Cookie size={14} /> <span className="hidden sm:inline">New Type</span>
-             </button>
-             <button 
-               onClick={() => setIsRestocking(true)}
-               className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-bold uppercase tracking-wider rounded-lg transition-all shadow-sm"
-             >
-               <Plus size={14} /> Add Stock
-             </button>
-
-            <AnimatePresence>
-              {notification && (
-                <MotionDiv 
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0 }}
-                  className={clsx(
-                    "px-4 py-2 rounded-lg font-medium shadow-xl border text-sm backdrop-blur-md hidden sm:block",
-                    notification.type === 'success' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-red-500/10 text-red-400 border-red-500/20"
-                  )}
-                >
-                  {notification.msg}
-                </MotionDiv>
-              )}
-            </AnimatePresence>
-          </div>
-        </div>
-
-        {/* Inventory Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-          {inventory.map((item) => {
-            const b = getBiscuit(item.biscuitId);
-            if (!b) return null;
-            return (
-              <div key={item.biscuitId} className="bg-slate-900 p-6 rounded-2xl border border-slate-800 flex flex-col items-center shadow-xl hover:border-slate-600 transition-all group hover:-translate-y-1 duration-300 relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-slate-700 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"/>
-                <div className="transform group-hover:scale-105 transition-transform duration-300 drop-shadow-2xl z-10">
-                  <BiscuitIcon biscuit={b} size="lg" />
-                </div>
-                <div className="mt-5 text-center z-10">
-                  <span className="block font-mono text-3xl font-bold text-slate-100 tracking-tight">{item.quantity}</span>
-                  <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mt-1 block truncate max-w-[120px]">{b.name}</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Main Action Area */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden min-h-[600px] flex flex-col shadow-2xl">
-        {/* Tabs */}
-        <div className="flex border-b border-slate-800 bg-slate-950/30">
-          <button 
-            onClick={() => setActiveTab('market')}
-            className={clsx("flex-1 py-5 text-sm font-semibold flex items-center justify-center gap-2 transition-all border-b-2 relative", activeTab === 'market' ? "border-amber-500 text-white bg-slate-800/30" : "border-transparent text-slate-500 hover:text-slate-300 hover:bg-slate-800/20")}
-          >
-            <ShoppingBag size={18} /> Marketplace <span className="bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded text-[10px] min-w-[20px]">{openTrades.length}</span>
-          </button>
-          <button 
-            onClick={() => setActiveTab('my-trades')}
-            className={clsx("flex-1 py-5 text-sm font-semibold flex items-center justify-center gap-2 transition-all border-b-2 relative", activeTab === 'my-trades' ? "border-amber-500 text-white bg-slate-800/30" : "border-transparent text-slate-500 hover:text-slate-300 hover:bg-slate-800/20")}
-          >
-            <Clock size={18} /> Active Trades 
-            {(myActionRequired.length > 0) && <span className="absolute top-4 right-1/3 w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-red-500/50" />}
-          </button>
-          <button 
-            onClick={() => setActiveTab('history')}
-            className={clsx("flex-1 py-5 text-sm font-semibold flex items-center justify-center gap-2 transition-all border-b-2 relative", activeTab === 'history' ? "border-amber-500 text-white bg-slate-800/30" : "border-transparent text-slate-500 hover:text-slate-300 hover:bg-slate-800/20")}
-          >
-            <History size={18} /> Trade History
-          </button>
-        </div>
-
-        <div className="p-6 md:p-8 flex-1 bg-slate-950/30 relative">
-          
-          {/* Post Offer */}
-          {(activeTab === 'market' || activeTab === 'my-trades') && (
-          <div className="mb-8">
-            <AnimatePresence mode='wait'>
-            {!isCreating ? (
-              <MotionButton 
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                onClick={() => setIsCreating(true)}
-                className="w-full py-6 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-dashed border-slate-700 hover:border-amber-500/50 rounded-xl font-medium transition-all flex items-center justify-center gap-3 group shadow-sm hover:shadow-md hover:text-amber-500"
-              >
-                <div className="p-2 bg-slate-800 rounded-lg border border-slate-700 group-hover:bg-amber-500 group-hover:text-slate-900 transition-colors">
-                   <Plus size={20} />
-                </div>
-                <span className="text-lg font-bold">Create New Exchange Offer</span>
-              </MotionButton>
-            ) : (
-              <MotionDiv 
-                initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-                className="bg-slate-900 p-8 rounded-xl border border-slate-700 shadow-xl overflow-hidden"
-              >
-                <div className="flex justify-between items-center mb-8 border-b border-slate-800 pb-4">
-                  <h3 className="font-bold text-white text-lg uppercase tracking-wide flex items-center gap-2">
-                    <RefreshCw size={20} className="text-amber-500"/> New Listing
-                  </h3>
-                  <button onClick={() => setIsCreating(false)} className="text-slate-500 hover:text-slate-300 p-2 hover:bg-slate-800 rounded transition-colors"><X size={20}/></button>
-                </div>
-
-                {/* Trade Type Switcher */}
-                <div className="flex gap-4 mb-6">
-                   <button 
-                    onClick={() => setCreateType('FIXED')}
-                    className={clsx("flex-1 py-3 border rounded-lg font-bold text-sm uppercase flex items-center justify-center gap-2 transition-all", createType === 'FIXED' ? "bg-blue-600 border-blue-500 text-white" : "bg-slate-950 border-slate-700 text-slate-500 hover:border-slate-600")}
-                   >
-                     <RefreshCw size={16} /> Fixed Price
-                   </button>
-                   <button 
-                    onClick={() => setCreateType('AUCTION')}
-                    className={clsx("flex-1 py-3 border rounded-lg font-bold text-sm uppercase flex items-center justify-center gap-2 transition-all", createType === 'AUCTION' ? "bg-purple-600 border-purple-500 text-white" : "bg-slate-950 border-slate-700 text-slate-500 hover:border-slate-600")}
-                   >
-                     <Gavel size={16} /> Auction
-                   </button>
-                </div>
-
-                <form onSubmit={handleCreateTrade} className="flex flex-col xl:flex-row gap-8 items-start xl:items-end">
-                  <div className="flex-1 space-y-3 w-full">
-                    <label className="text-xs text-emerald-500 uppercase font-bold tracking-wider flex items-center gap-2"><ArrowRight className="rotate-180" size={14}/> You Give</label>
-                    <div className="flex gap-4">
-                      <input type="number" min="1" value={offerQty} onChange={e => setOfferQty(parseInt(e.target.value))} className="w-28 bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-amber-500 outline-none text-lg font-mono text-center font-bold" />
-                      <div className="flex-1">
-                         <CustomSelect value={offerBid} onChange={setOfferBid} options={biscuitOptions} placeholder="Select Biscuit..." />
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center justify-center self-center pb-2 text-slate-600">
-                    <ArrowRight size={32} className="hidden xl:block"/>
-                    <ArrowRight size={32} className="xl:hidden rotate-90"/>
-                  </div>
-                  
-                  <div className="flex-1 space-y-3 w-full">
-                    <label className={clsx("text-xs uppercase font-bold tracking-wider flex items-center gap-2", createType === 'FIXED' ? "text-amber-500" : "text-purple-500")}>
-                       <ArrowRight size={14}/> {createType === 'FIXED' ? "You Get" : "Preferred (Optional)"}
-                    </label>
-                    <div className="flex gap-4">
-                      <input type="number" min="1" value={reqQty} onChange={e => setReqQty(parseInt(e.target.value))} className="w-28 bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-amber-500 outline-none text-lg font-mono text-center font-bold" />
-                      <div className="flex-1">
-                         <CustomSelect value={reqBid} onChange={setReqBid} options={biscuitOptions} placeholder="Select Biscuit..." />
-                      </div>
-                    </div>
-                  </div>
-
-                  <button type="submit" className={clsx(
-                     "w-full xl:w-auto px-10 py-4 text-white rounded-lg font-bold text-sm uppercase tracking-wider shadow-lg transition-all active:scale-[0.98]",
-                     createType === 'FIXED' ? "bg-gradient-to-r from-blue-600 to-cyan-600 shadow-blue-900/20" : "bg-gradient-to-r from-purple-600 to-pink-600 shadow-purple-900/20"
-                  )}>
-                    {createType === 'FIXED' ? "Post Trade" : "Start Auction"}
-                  </button>
-                </form>
-              </MotionDiv>
-            )}
-            </AnimatePresence>
-          </div>
-          )}
-
-          {activeTab === 'market' && (
-            <div className="space-y-6">
-               {openTrades.length === 0 ? (
-                 <div className="text-center py-24 bg-slate-900/30 rounded-2xl border border-slate-800/50 border-dashed">
-                   <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-6">
-                     <ShoppingBag size={32} className="text-slate-600" />
-                   </div>
-                   <p className="text-slate-400 text-lg font-bold">The market is quiet.</p>
-                   <p className="text-slate-600 text-sm mt-2">Be the first to post a trade offer!</p>
-                 </div>
-               ) : (
-                 <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-8">
-                   {openTrades.map(trade => {
-                     if (trade.tradeType === 'AUCTION') {
-                        return (
-                          <AuctionTradeCard 
-                             key={trade.id}
-                             trade={trade}
-                             biscuits={biscuits}
-                             onBid={(bidId, qty) => handlePlaceBid(trade.id, bidId, qty)}
-                          />
-                        )
-                     }
-                     return (
-                       <MarketTradeCard 
-                          key={trade.id} 
-                          trade={trade} 
-                          biscuits={biscuits} 
-                          onAccept={() => handleAccept(trade.id)} 
-                          userBalance={inventory.find(i => i.biscuitId === trade.requestBiscuitId)?.quantity || 0}
-                        />
-                     )
-                   })}
-                 </div>
-               )}
-            </div>
-          )}
-
-          {activeTab === 'my-trades' && (
-            <div className="space-y-12">
-              {/* ACTION REQUIRED */}
-              {(myActionRequired.length > 0 || myPendingOthers.length > 0) && (
-                <div className="space-y-6">
-                   <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2 border-b border-slate-800 pb-4">
-                     <AlertCircle size={16} className="text-amber-500"/> Action Required
-                   </h3>
-                   <div className="grid gap-6">
-                    {myActionRequired.map(trade => (
-                        <PendingTradeRow key={trade.id} trade={trade} biscuits={biscuits} onConfirm={() => handleConfirm(trade.id)} isWaitingOnMe={true} />
-                    ))}
-                    {myPendingOthers.map(trade => (
-                        <PendingTradeRow key={trade.id} trade={trade} biscuits={biscuits} onConfirm={() => {}} isWaitingOnMe={false} />
-                    ))}
-                   </div>
-                </div>
-              )}
-
-              {/* MY LISTINGS */}
-              <div className="space-y-6">
-                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-800 pb-4">My Open Orders</h3>
-                 {myListings.length === 0 && (
-                    <div className="text-slate-600 text-sm italic px-4">No active orders posted.</div>
-                 )}
-                 <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-6">
-                 {myListings.map(trade => (
-                    <MyListingCard 
-                      key={trade.id} 
-                      trade={trade} 
-                      biscuits={biscuits} 
-                      onCancel={() => handleCancel(trade.id)}
-                      onAcceptBid={(bidId) => handleAcceptBid(bidId, trade.id)} 
-                    />
-                 ))}
-                 </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'history' && (
-             <div className="space-y-6">
-               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-800 pb-4">Completed Exchanges</h3>
-               {history.length === 0 ? (
-                 <div className="text-slate-500 text-sm italic px-4 py-8 text-center bg-slate-900/30 rounded-xl border border-slate-800 border-dashed">
-                    No completed trades yet. Start swapping!
-                 </div>
-               ) : (
-                 <div className="grid gap-4">
-                   {history.map(trade => (
-                     <HistoryRow key={trade.id} trade={trade} biscuits={biscuits} userId={user?.id || ''} />
-                   ))}
-                 </div>
-               )}
-             </div>
-          )}
-
-        </div>
-      </div>
     </div>
   );
 };
