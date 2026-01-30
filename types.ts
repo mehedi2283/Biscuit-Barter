@@ -50,11 +50,12 @@ export interface P2PTrade {
   
   offerBiscuitId: string;
   offerQty: number;
-  offerDetails?: TradeItem[]; // NEW: For Multi-Item Bundles
+  offerDetails?: TradeItem[]; // For Multi-Item Bundles (Creator gives)
   
   // For Fixed: Exact request. For Auction: Preferred/Display only.
   requestBiscuitId: string;
   requestQty: number;
+  requestDetails?: TradeItem[]; // NEW: For accepted Multi-Item Bids (Creator receives)
   
   status: P2PTradeStatus;
   tradeType: P2PTradeType; 
@@ -73,6 +74,7 @@ export interface TradeBid {
   bidderName: string;
   biscuitId: string;
   qty: number;
+  bidDetails?: TradeItem[]; // NEW: For Bundle Bids
   createdAt: number;
 }
 

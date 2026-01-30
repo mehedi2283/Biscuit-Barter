@@ -39,6 +39,7 @@ export const Dashboard: React.FC = () => {
   const [isSubmittingTrade, setIsSubmittingTrade] = useState(false);
   const [isSubmittingStock, setIsSubmittingStock] = useState(false);
   const [isSubmittingItem, setIsSubmittingItem] = useState(false);
+  const [isSubmittingBid, setIsSubmittingBid] = useState(false);
 
   // Modal State: Inventory
   const [isRestocking, setIsRestocking] = useState(false);
@@ -59,6 +60,11 @@ export const Dashboard: React.FC = () => {
   const [reqId, setReqId] = useState('');
   const [reqQty, setReqQty] = useState(1);
   const [tradeType, setTradeType] = useState<'FIXED' | 'AUCTION'>('FIXED');
+
+  // Modal State: Place Bid (Auction)
+  const [isPlacingBid, setIsPlacingBid] = useState(false);
+  const [activeAuctionId, setActiveAuctionId] = useState<string>('');
+  const [bidBundleItems, setBidBundleItems] = useState<TradeItem[]>([]);
 
   // Modal State: Create Biscuit (User)
   const [isCreatingBiscuit, setIsCreatingBiscuit] = useState(false);
@@ -160,21 +166,21 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  const handleAddBundleItem = () => {
-      // Default to first available item that isn't already 0 quantity (optional logic)
+  // --- BUNDLE BUILDER LOGIC ---
+  const addBundleItem = (items: TradeItem[], setter: React.Dispatch<React.SetStateAction<TradeItem[]>>) => {
       if (biscuits.length > 0) {
-          setBundleItems([...bundleItems, { biscuitId: biscuits[0].id, qty: 1 }]);
+          setter([...items, { biscuitId: biscuits[0].id, qty: 1 }]);
       }
   };
 
-  const updateBundleItem = (index: number, field: keyof TradeItem, value: any) => {
-      const newItems = [...bundleItems];
+  const updateBundleItem = (index: number, field: keyof TradeItem, value: any, items: TradeItem[], setter: React.Dispatch<React.SetStateAction<TradeItem[]>>) => {
+      const newItems = [...items];
       newItems[index] = { ...newItems[index], [field]: value };
-      setBundleItems(newItems);
+      setter(newItems);
   };
 
-  const removeBundleItem = (index: number) => {
-      setBundleItems(bundleItems.filter((_, i) => i !== index));
+  const removeBundleItem = (index: number, items: TradeItem[], setter: React.Dispatch<React.SetStateAction<TradeItem[]>>) => {
+      setter(items.filter((_, i) => i !== index));
   };
 
   const handleCreateTrade = async (e: React.FormEvent) => {
@@ -257,6 +263,64 @@ export const Dashboard: React.FC = () => {
     } finally {
         setIsSubmittingTrade(false);
     }
+  };
+
+  const openBidModal = (tradeId: string) => {
+      setActiveAuctionId(tradeId);
+      // Initialize with one item row
+      if (biscuits.length > 0) {
+        setBidBundleItems([{ biscuitId: biscuits[0].id, qty: 1 }]);
+      }
+      setIsPlacingBid(true);
+  };
+
+  const handleBidSubmit = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!user || !activeAuctionId) return;
+
+      setIsSubmittingBid(true);
+      try {
+          // Validation
+          if (bidBundleItems.length === 0) {
+              alert("Please add at least one item to your bid.");
+              setIsSubmittingBid(false);
+              return;
+          }
+
+          for (const item of bidBundleItems) {
+              const avail = getQty(item.biscuitId);
+              if (item.qty > avail) {
+                 alert(`Insufficient stock for ${getBiscuit(item.biscuitId)?.name}. You have ${avail}.`);
+                 setIsSubmittingBid(false);
+                 return;
+              }
+          }
+
+          // Use first item as primary for DB compatibility
+          const primaryItem = bidBundleItems[0];
+          
+          const res = await BackendService.placeBid(
+              activeAuctionId, 
+              user.id, 
+              primaryItem.biscuitId, 
+              primaryItem.qty, 
+              bidBundleItems // Pass full bundle
+          );
+
+          if (res.success) {
+              setIsPlacingBid(false);
+              setBidBundleItems([]);
+              setActiveAuctionId('');
+              
+              // Refresh Inventory (deducted)
+              const freshInv = await BackendService.getUserInventory(user.id);
+              setInventory(freshInv);
+          } else {
+              alert(res.message);
+          }
+      } finally {
+          setIsSubmittingBid(false);
+      }
   };
 
   const handleAcceptTrade = (trade: P2PTrade) => {
@@ -370,6 +434,29 @@ export const Dashboard: React.FC = () => {
     { value: 'any', label: 'Any / Surprise Me', icon: '🎁' },
     ...biscuitOptions
   ];
+
+  // Component to render a bundle visual
+  const BundleDisplay = ({ items }: { items: TradeItem[] }) => {
+    return (
+        <div className="flex -space-x-3 overflow-hidden p-1">
+            {items.slice(0, 4).map((item, idx) => {
+                const b = getBiscuit(item.biscuitId);
+                if (!b) return null;
+                return (
+                    <div key={idx} className="relative w-12 h-12 md:w-16 md:h-16 rounded-full border-2 border-slate-900 bg-slate-800 flex items-center justify-center shadow-lg" style={{ zIndex: 10 - idx }}>
+                        <BiscuitIcon biscuit={b} size="sm" className="w-full h-full text-xs" />
+                        <span className="absolute bottom-0 right-0 bg-slate-900 text-white text-[9px] px-1.5 rounded-full border border-slate-700 font-bold">x{item.qty}</span>
+                    </div>
+                );
+            })}
+            {items.length > 4 && (
+                <div className="w-12 h-12 md:w-16 md:h-16 rounded-full border-2 border-slate-900 bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400 z-0">
+                    +{items.length - 4}
+                </div>
+            )}
+        </div>
+    );
+  };
 
   return (
     <div className="space-y-8 pb-20">
@@ -490,6 +577,7 @@ export const Dashboard: React.FC = () => {
 
                     // Handle Bundles Visual
                     const isBundle = trade.offerDetails && trade.offerDetails.length > 0;
+                    const isAuction = trade.tradeType === 'AUCTION';
 
                     return (
                       <div key={trade.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 md:p-8 flex flex-col lg:flex-row items-center justify-between gap-6 hover:border-slate-700 transition-colors shadow-sm">
@@ -497,14 +585,7 @@ export const Dashboard: React.FC = () => {
                             {/* OFFER SIDE */}
                             <div className="flex flex-col items-center gap-2 relative">
                                {isBundle ? (
-                                   <div className="relative">
-                                       <div className="absolute -right-2 -top-2 z-10 bg-amber-500 text-slate-900 font-bold text-[10px] px-2 py-0.5 rounded-full border border-white shadow-sm">
-                                           +{trade.offerDetails!.length - 1} More
-                                       </div>
-                                       {/* Stack Effect */}
-                                       <div className="absolute top-1 left-1 w-full h-full bg-slate-800 rounded-full opacity-50 -z-10 translate-x-1 translate-y-1"></div>
-                                       <BiscuitIcon biscuit={offerB} size="sm" className="md:w-20 md:h-20 md:text-4xl" />
-                                   </div>
+                                   <BundleDisplay items={trade.offerDetails!} />
                                ) : (
                                    <BiscuitIcon biscuit={offerB} size="sm" className="md:w-20 md:h-20 md:text-4xl" />
                                )}
@@ -538,18 +619,27 @@ export const Dashboard: React.FC = () => {
                             </div>
                          </div>
                          
-                         <button 
-                           onClick={() => handleAcceptTrade(trade)}
-                           disabled={!canAfford}
-                           className={clsx(
-                             "w-full lg:w-auto px-8 py-4 rounded-xl font-bold text-sm md:text-lg uppercase tracking-wide transition-all shadow-lg min-w-[160px]",
-                             canAfford 
-                               ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/20 active:scale-95" 
-                               : "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700"
-                           )}
-                         >
-                            {canAfford ? "Accept Deal" : "Need Stock"}
-                         </button>
+                         {isAuction ? (
+                             <button 
+                                onClick={() => openBidModal(trade.id)}
+                                className="w-full lg:w-auto px-8 py-4 rounded-xl font-bold text-sm md:text-lg uppercase tracking-wide transition-all shadow-lg min-w-[160px] bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white shadow-purple-900/20 active:scale-95"
+                             >
+                                Place Bid
+                             </button>
+                         ) : (
+                             <button 
+                               onClick={() => handleAcceptTrade(trade)}
+                               disabled={!canAfford}
+                               className={clsx(
+                                 "w-full lg:w-auto px-8 py-4 rounded-xl font-bold text-sm md:text-lg uppercase tracking-wide transition-all shadow-lg min-w-[160px]",
+                                 canAfford 
+                                   ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/20 active:scale-95" 
+                                   : "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700"
+                               )}
+                             >
+                                {canAfford ? "Accept Deal" : "Need Stock"}
+                             </button>
+                         )}
                       </div>
                     );
                  })}
@@ -582,7 +672,8 @@ export const Dashboard: React.FC = () => {
                     else partnerName = "Pending...";
                  }
 
-                 const isBundle = trade.offerDetails && trade.offerDetails.length > 0;
+                 const isOfferBundle = trade.offerDetails && trade.offerDetails.length > 0;
+                 const isRequestBundle = trade.requestDetails && trade.requestDetails.length > 0;
 
                  return (
                     <div key={trade.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 md:p-8 flex flex-col lg:flex-row items-center gap-6 shadow-sm">
@@ -605,10 +696,10 @@ export const Dashboard: React.FC = () => {
                                  <div className="flex flex-col items-end">
                                     <span className="text-[10px] md:text-xs uppercase font-bold text-slate-500 mb-1">{isCreator ? "You Offered" : "Partner Offered"}</span>
                                     <span className="text-sm md:text-xl font-bold text-white flex items-center gap-3">
-                                       {isBundle ? (
-                                           <span className="flex items-center gap-2">
-                                             <Layers size={18} className="text-amber-500"/> Bundle ({trade.offerDetails!.length} Items)
-                                           </span>
+                                       {isOfferBundle ? (
+                                           <div className="flex items-center gap-2">
+                                              <BundleDisplay items={trade.offerDetails!} />
+                                           </div>
                                        ) : (
                                            <>
                                             {trade.offerQty} {offerB.name}
@@ -629,6 +720,10 @@ export const Dashboard: React.FC = () => {
                                         <span className="text-sm md:text-xl font-bold text-purple-400 flex items-center gap-3">
                                             🎁 Surprise
                                         </span>
+                                    ) : isRequestBundle ? (
+                                        <div className="flex items-center gap-2">
+                                           <BundleDisplay items={trade.requestDetails!} />
+                                        </div>
                                     ) : (
                                         <span className="text-sm md:text-xl font-bold text-white flex items-center gap-3">
                                             <BiscuitIcon biscuit={reqB} size="sm" className="w-8 h-8 md:w-12 md:h-12 text-sm md:text-xl"/>
@@ -680,6 +775,70 @@ export const Dashboard: React.FC = () => {
       </div>
 
       {/* --- MODALS --- */}
+
+      {/* Place Bid Modal */}
+      <Modal 
+        isOpen={isPlacingBid} 
+        onClose={() => setIsPlacingBid(false)} 
+        title="Place Your Bid" 
+        icon={<Gavel className="text-purple-500" />}
+        maxWidth="max-w-2xl"
+      >
+        <form onSubmit={handleBidSubmit} className="space-y-6">
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-sm text-slate-400">
+                You are bidding on an Auction. You can offer a single item or build a mixed bundle.
+            </div>
+
+            <div className="space-y-3">
+                <div className="flex justify-between items-center mb-2">
+                    <span className="text-xs font-bold uppercase text-slate-500">Your Offer</span>
+                    <button type="button" onClick={() => addBundleItem(bidBundleItems, setBidBundleItems)} className="text-xs bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded text-white border border-slate-700">
+                        + Add Item
+                    </button>
+                </div>
+                
+                <div className="max-h-[300px] overflow-y-auto custom-scrollbar space-y-2 pr-2">
+                    {bidBundleItems.map((item, idx) => {
+                         const avail = getQty(item.biscuitId);
+                         return (
+                            <div key={idx} className="flex items-center gap-2 bg-slate-900 p-2 rounded-xl border border-slate-800">
+                                <div className="flex-1">
+                                    <CustomSelect 
+                                    value={item.biscuitId}
+                                    onChange={(v) => updateBundleItem(idx, 'biscuitId', v, bidBundleItems, setBidBundleItems)}
+                                    options={biscuitOptions}
+                                    className="text-xs"
+                                    />
+                                </div>
+                                <div className="w-20">
+                                    <input 
+                                    type="number" min="1" max={avail}
+                                    value={item.qty}
+                                    onChange={(e) => updateBundleItem(idx, 'qty', parseInt(e.target.value) || 1, bidBundleItems, setBidBundleItems)}
+                                    className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2.5 px-2 text-center text-white font-bold text-sm outline-none focus:border-purple-500"
+                                    />
+                                </div>
+                                <button type="button" onClick={() => removeBundleItem(idx, bidBundleItems, setBidBundleItems)} className="p-2.5 text-slate-500 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-colors"><Trash2 size={16}/></button>
+                            </div>
+                        )
+                    })}
+                    {bidBundleItems.length === 0 && (
+                        <div className="text-center py-8 text-slate-500 border border-dashed border-slate-800 rounded-xl text-xs">
+                            No items in bid. Click "Add Item" to start.
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            <button 
+                type="submit" 
+                disabled={bidBundleItems.length === 0 || isSubmittingBid} 
+                className="w-full py-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl text-white font-bold text-sm shadow-lg shadow-purple-900/20 active:scale-[0.98] uppercase tracking-wide flex items-center justify-center gap-2"
+            >
+                {isSubmittingBid ? <Loader2 className="animate-spin" size={20}/> : "Confirm Bid"}
+            </button>
+        </form>
+      </Modal>
 
       {/* Inventory Modal */}
       <Modal 
@@ -805,7 +964,7 @@ export const Dashboard: React.FC = () => {
                         <ArrowRight size={14} className="rotate-180" /> You Give {tradeType === 'AUCTION' && "(Bundle)"}
                     </span>
                     {tradeType === 'AUCTION' && (
-                        <button type="button" onClick={handleAddBundleItem} className="text-[10px] bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded border border-slate-700 text-slate-300 font-bold uppercase transition-colors">
+                        <button type="button" onClick={() => addBundleItem(bundleItems, setBundleItems)} className="text-[10px] bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded border border-slate-700 text-slate-300 font-bold uppercase transition-colors">
                             + Add Item
                         </button>
                     )}
@@ -820,7 +979,7 @@ export const Dashboard: React.FC = () => {
                                       <div className="flex-1">
                                          <CustomSelect 
                                             value={item.biscuitId}
-                                            onChange={(v) => updateBundleItem(idx, 'biscuitId', v)}
+                                            onChange={(v) => updateBundleItem(idx, 'biscuitId', v, bundleItems, setBundleItems)}
                                             options={biscuitOptions}
                                             className="text-xs"
                                          />
@@ -829,11 +988,11 @@ export const Dashboard: React.FC = () => {
                                           <input 
                                             type="number" min="1" max={avail}
                                             value={item.qty}
-                                            onChange={(e) => updateBundleItem(idx, 'qty', parseInt(e.target.value) || 1)}
+                                            onChange={(e) => updateBundleItem(idx, 'qty', parseInt(e.target.value) || 1, bundleItems, setBundleItems)}
                                             className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2.5 px-2 text-center text-white font-bold text-sm outline-none focus:border-amber-500"
                                           />
                                       </div>
-                                      <button type="button" onClick={() => removeBundleItem(idx)} className="p-2.5 text-slate-500 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-colors"><Trash2 size={16}/></button>
+                                      <button type="button" onClick={() => removeBundleItem(idx, bundleItems, setBundleItems)} className="p-2.5 text-slate-500 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-colors"><Trash2 size={16}/></button>
                                   </div>
                               )
                           })}
@@ -891,7 +1050,7 @@ export const Dashboard: React.FC = () => {
                             </div>
                         )}
                         {tradeType === 'AUCTION' && bundleItems.length === 0 && (
-                            <button type="button" onClick={handleAddBundleItem} className="w-full py-3 border border-dashed border-slate-700 rounded-xl text-slate-500 text-xs font-bold uppercase hover:border-amber-500 hover:text-amber-500 transition-colors">
+                            <button type="button" onClick={() => addBundleItem(bundleItems, setBundleItems)} className="w-full py-3 border border-dashed border-slate-700 rounded-xl text-slate-500 text-xs font-bold uppercase hover:border-amber-500 hover:text-amber-500 transition-colors">
                                 Switch to Multi-Item Bundle
                             </button>
                         )}

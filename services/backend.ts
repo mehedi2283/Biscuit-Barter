@@ -29,14 +29,6 @@ export const BackendService = {
         return null;
       }
 
-      // --- CRITICAL: LOG FULL RESPONSE FOR USER DEBUGGING ---
-      if (data && data.raw) {
-        console.group("ImgBB Upload Debug Info");
-        console.log("Full Raw API Response:", data.raw);
-        console.log("Delete URL (Manual):", data.raw.data?.delete_url);
-        console.groupEnd();
-      }
-
       if (data && data.success) {
         return {
           url: data.url,
@@ -60,10 +52,7 @@ export const BackendService = {
         }
       });
 
-      if (error) {
-         console.warn("Edge Function Delete Error:", error);
-         return false;
-      }
+      if (error) return false;
       return data?.success || false;
     } catch (e) {
       console.warn("Delete exception:", e);
@@ -97,7 +86,6 @@ export const BackendService = {
     const { data, error } = await supabase.from('users').select('*').eq('id', id).single();
     
     if (error && error.code !== 'PGRST116') {
-       // Log genuine errors (not just 'Row not found')
        console.error("getUserById DB Error:", error);
     }
 
@@ -118,18 +106,15 @@ export const BackendService = {
   },
 
   deleteUser: async (userId: string): Promise<boolean> => {
-    // Note: This deletes the profile. Auth user might remain until deleted via Supabase Admin Console
     const { error } = await supabase.from('users').delete().eq('id', userId);
     return !error;
   },
 
   authenticate: async (email: string, password: string): Promise<{user?: User, error?: string}> => {
     try {
-      // 1. Sign In via Supabase Auth (GoTrue)
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       
       if (error) {
-        console.warn("Auth failed:", error.message);
         return { error: error.message };
       }
       
@@ -137,27 +122,19 @@ export const BackendService = {
         return { error: "Authentication failed. No user returned." };
       }
 
-      // 2. Fetch Profile from public.users
       let profile = await BackendService.getUserById(data.user.id);
       
-      // Retry logic if profile creation trigger is slow
+      // Retry logic
       if (!profile) {
-         console.log("Profile not found immediately, retrying...");
          await new Promise(r => setTimeout(r, 1000));
          profile = await BackendService.getUserById(data.user.id);
-         
-         if (!profile) {
-             await new Promise(r => setTimeout(r, 2000));
-             profile = await BackendService.getUserById(data.user.id);
-         }
       }
 
       if (!profile) {
-        return { error: "Login successful, but User Profile is missing. Did you reset the database? Please sign up again." };
+        return { error: "User Profile missing. Database might be reset." };
       }
 
       if (profile.isFrozen) {
-        // Force logout if frozen
         await supabase.auth.signOut();
         return { error: "Your account has been frozen by an Administrator." };
       }
@@ -208,7 +185,6 @@ export const BackendService = {
   },
 
   updateUserInventory: async (userId: string, biscuitId: string, quantity: number) => {
-    // Use upsert with explicit constraint
     const { error } = await supabase.from('inventory').upsert({ 
       user_id: userId, 
       biscuit_id: biscuitId, 
@@ -219,7 +195,6 @@ export const BackendService = {
 
   adjustInventory: async (userId: string, biscuitId: string, delta: number): Promise<boolean> => {
     try {
-      // 1. Fetch current state with ID
       const { data: current, error: fetchError } = await supabase
         .from('inventory')
         .select('id, quantity')
@@ -227,37 +202,25 @@ export const BackendService = {
         .eq('biscuit_id', biscuitId)
         .single();
 
-      // Ignore 'Row not found' error (PGRST116), handle others
       if (fetchError && fetchError.code !== 'PGRST116') {
-        console.error("Fetch inventory error:", fetchError);
         return false;
       }
 
       const currentQty = current ? current.quantity : 0;
 
-      // 2. Validate deduction
       if (delta < 0 && currentQty < Math.abs(delta)) {
-        console.warn(`AdjustInventory Failed: Not enough stock. Has ${currentQty}, Need ${Math.abs(delta)}`);
         return false;
       }
 
       const newQty = currentQty + delta;
 
-      // 3. Execute Update or Insert explicitly to avoid upsert ambiguity
       if (current?.id) {
-        // Row exists -> Update
         const { error: updateError } = await supabase
           .from('inventory')
           .update({ quantity: newQty })
           .eq('id', current.id);
-
-        if (updateError) {
-          console.error("Update inventory error:", updateError);
-          return false;
-        }
+        if (updateError) return false;
       } else {
-        // Row missing -> Insert (Only if we are adding stock)
-        // If delta < 0 and no row, we returned false above.
         const { error: insertError } = await supabase
           .from('inventory')
           .insert({
@@ -265,11 +228,7 @@ export const BackendService = {
             biscuit_id: biscuitId,
             quantity: newQty
           });
-
-        if (insertError) {
-          console.error("Insert inventory error:", insertError);
-          return false;
-        }
+        if (insertError) return false;
       }
 
       return true;
@@ -289,12 +248,11 @@ export const BackendService = {
       brand: b.brand,
       icon: b.icon,
       color: b.color,
-      imageDeleteHash: b.image_delete_hash // Now stores Storage Path (filename)
+      imageDeleteHash: b.image_delete_hash
     }));
   },
 
   updateBiscuit: async (id: string, updates: Partial<Biscuit>) => {
-    // Check if image needs upload
     let deleteHash = undefined;
     if (updates.icon && updates.icon.startsWith('data:')) {
       const result = await BackendService.uploadImage(updates.icon);
@@ -312,9 +270,7 @@ export const BackendService = {
       image_delete_hash: deleteHash
     };
 
-    // Remove undefined
     Object.keys(dbUpdates).forEach(key => dbUpdates[key] === undefined && delete dbUpdates[key]);
-
     await supabase.from('biscuits').update(dbUpdates).eq('id', id);
   },
 
@@ -333,7 +289,6 @@ export const BackendService = {
         }
       }
 
-      // Explicitly saving deleteHash to 'image_delete_hash' column
       const { data, error } = await supabase.from('biscuits').insert({
         name, 
         brand, 
@@ -362,30 +317,19 @@ export const BackendService = {
 
   deleteBiscuit: async (id: string): Promise<boolean> => {
     try {
-      // 1. Get biscuit to find image hash
       const { data: biscuit } = await supabase.from('biscuits').select('image_delete_hash').eq('id', id).single();
       
-      // 2. Delete image via Supabase Storage
       if (biscuit?.image_delete_hash) {
         await BackendService.deleteImageFromHost(biscuit.image_delete_hash);
       }
       
-      // 3. Database cleanup (Rules, Trades, Inventory)
       await supabase.from('exchange_rules').delete().or(`from_biscuit_id.eq.${id},to_biscuit_id.eq.${id}`);
       await supabase.from('p2p_trades').delete().or(`offer_biscuit_id.eq.${id},request_biscuit_id.eq.${id}`);
       await supabase.from('inventory').delete().eq('biscuit_id', id);
 
-      // 4. Delete Biscuit Row
       const { error } = await supabase.from('biscuits').delete().eq('id', id);
-      
-      if (error) {
-        console.error("Delete Biscuit DB Error:", error);
-        return false;
-      }
-      
-      return true;
+      return !error;
     } catch (e) {
-      console.error("Delete Biscuit Exception:", e);
       return false;
     }
   },
@@ -404,7 +348,6 @@ export const BackendService = {
 
   saveRule: async (rule: ExchangeRule) => {
     const isTempId = !rule.id.includes('-');
-
     const payload: any = {
       from_biscuit_id: rule.fromBiscuitId,
       to_biscuit_id: rule.toBiscuitId,
@@ -412,13 +355,8 @@ export const BackendService = {
       to_qty: rule.toQty,
       is_active: rule.isActive
     };
-    
-    if (!isTempId) {
-       payload.id = rule.id;
-    }
-
-    const { error } = await supabase.from('exchange_rules').upsert(payload);
-    if (error) console.error("Error saving rule:", error);
+    if (!isTempId) payload.id = rule.id;
+    await supabase.from('exchange_rules').upsert(payload);
   },
 
   deleteRule: async (ruleId: string) => {
@@ -437,12 +375,13 @@ export const BackendService = {
       takerName: t.taker_name,
       offerBiscuitId: t.offer_biscuit_id,
       offerQty: t.offer_qty,
-      offerDetails: t.offer_details, // Map new Bundle column
+      offerDetails: t.offer_details,
       requestBiscuitId: t.request_biscuit_id,
       requestQty: t.request_qty,
+      requestDetails: t.request_details, // New
       status: t.status,
       tradeType: t.trade_type || 'FIXED', 
-      isAny: t.is_any, // Map DB column to Type
+      isAny: t.is_any, 
       creatorConfirmed: t.creator_confirmed,
       takerConfirmed: t.taker_confirmed,
       createdAt: new Date(t.created_at).getTime()
@@ -472,6 +411,7 @@ export const BackendService = {
       offerDetails: t.offer_details,
       requestBiscuitId: t.request_biscuit_id,
       requestQty: t.request_qty,
+      requestDetails: t.request_details, // New
       status: t.status,
       tradeType: t.trade_type || 'FIXED',
       isAny: t.is_any,
@@ -493,7 +433,7 @@ export const BackendService = {
         if (!success) {
            // Rollback previous deductions if one fails
            for (const rbItem of offerBundle) {
-             if (rbItem.biscuitId === item.biscuitId) break; // Don't rollback current failed one
+             if (rbItem.biscuitId === item.biscuitId) break; 
              await BackendService.adjustInventory(userId, rbItem.biscuitId, rbItem.qty);
            }
            return { success: false, message: `Insufficient inventory for ${item.biscuitId}` };
@@ -522,7 +462,6 @@ export const BackendService = {
       payload.offer_details = offerBundle;
     }
 
-    // Only add is_any if true to avoid schema cache errors on older DBs for standard trades
     if (isAny) {
       payload.is_any = true;
     }
@@ -530,8 +469,6 @@ export const BackendService = {
     const { error } = await supabase.from('p2p_trades').insert(payload);
 
     if (error) {
-      console.error("CREATE TRADE DB ERROR:", error);
-      
       // Attempt Refund
       if (offerBundle && offerBundle.length > 0) {
          for (const item of offerBundle) {
@@ -540,12 +477,6 @@ export const BackendService = {
       } else {
          await BackendService.adjustInventory(userId, offerBiscuitId, offerQty);
       }
-      
-      // PGRST204 is 'Could not find the column'
-      // 42703 is 'undefined_column'
-      if (error.code === '42703' || error.code === 'PGRST204' || error.message?.includes('is_any') || error.message?.includes('offer_details')) {
-         return { success: false, message: 'System Sync Error: Please refresh the Database Schema Cache in Supabase settings.' };
-      }
       return { success: false, message: `Database error: ${error.message}` };
     }
     return { success: true, message: tradeType === 'AUCTION' ? 'Auction Started!' : 'Trade Posted!' };
@@ -553,26 +484,52 @@ export const BackendService = {
 
   // --- BIDDING SYSTEM ---
 
-  placeBid: async (tradeId: string, bidderId: string, biscuitId: string, qty: number): Promise<TradeResult> => {
+  placeBid: async (tradeId: string, bidderId: string, biscuitId: string, qty: number, bidBundle?: TradeItem[]): Promise<TradeResult> => {
     const user = await BackendService.getUserById(bidderId);
     if (!user) return { success: false, message: 'User not found' };
 
-    // 1. Deduct Inventory (Commitment)
-    const success = await BackendService.adjustInventory(bidderId, biscuitId, -qty);
-    if (!success) return { success: false, message: 'Insufficient biscuits to place this bid.' };
+    // 1. Inventory Deduction
+    if (bidBundle && bidBundle.length > 0) {
+        for (const item of bidBundle) {
+            const success = await BackendService.adjustInventory(bidderId, item.biscuitId, -item.qty);
+            if (!success) {
+                // Rollback
+                for (const rbItem of bidBundle) {
+                    if (rbItem.biscuitId === item.biscuitId) break;
+                    await BackendService.adjustInventory(bidderId, rbItem.biscuitId, rbItem.qty);
+                }
+                return { success: false, message: `Insufficient inventory for ${item.biscuitId}` };
+            }
+        }
+    } else {
+        const success = await BackendService.adjustInventory(bidderId, biscuitId, -qty);
+        if (!success) return { success: false, message: 'Insufficient biscuits to place this bid.' };
+    }
 
     // 2. Insert Bid
-    const { error } = await supabase.from('trade_bids').insert({
+    const payload: any = {
       trade_id: tradeId,
       bidder_id: bidderId,
       bidder_name: user.name,
       biscuit_id: biscuitId,
       qty: qty
-    });
+    };
+    
+    if (bidBundle && bidBundle.length > 0) {
+        payload.bid_details = bidBundle;
+    }
+
+    const { error } = await supabase.from('trade_bids').insert(payload);
 
     if (error) {
       // Refund on failure
-      await BackendService.adjustInventory(bidderId, biscuitId, qty);
+      if (bidBundle && bidBundle.length > 0) {
+        for (const item of bidBundle) {
+            await BackendService.adjustInventory(bidderId, item.biscuitId, item.qty);
+        }
+      } else {
+        await BackendService.adjustInventory(bidderId, biscuitId, qty);
+      }
       return { success: false, message: 'Failed to place bid.' };
     }
 
@@ -588,6 +545,7 @@ export const BackendService = {
       bidderName: b.bidder_name,
       biscuitId: b.biscuit_id,
       qty: b.qty,
+      bidDetails: b.bid_details, // Map Bundle
       createdAt: new Date(b.created_at).getTime()
     }));
   },
@@ -600,15 +558,21 @@ export const BackendService = {
     if (!bid || !trade) return { success: false, message: 'Bid or Trade not found.' };
     if (trade.creator_id !== creatorId) return { success: false, message: 'Not authorized.' };
 
-    // 2. Convert Trade to Pending
-    const { error: updateError } = await supabase.from('p2p_trades').update({
+    const updatePayload: any = {
       status: 'PENDING',
       taker_id: bid.bidder_id,
       taker_name: bid.bidder_name,
-      request_biscuit_id: bid.biscuit_id, // Lock in the bid item as the final request
+      request_biscuit_id: bid.biscuit_id,
       request_qty: bid.qty,
-      is_any: false // No longer "Any" once accepted
-    }).eq('id', tradeId);
+      is_any: false
+    };
+
+    if (bid.bid_details) {
+        updatePayload.request_details = bid.bid_details;
+    }
+
+    // 2. Convert Trade to Pending
+    const { error: updateError } = await supabase.from('p2p_trades').update(updatePayload).eq('id', tradeId);
 
     if (updateError) return { success: false, message: 'Failed to update trade status.' };
 
@@ -618,7 +582,13 @@ export const BackendService = {
       for (const b of allBids) {
         if (b.id !== bidId) {
           // Refund
-          await BackendService.adjustInventory(b.bidder_id, b.biscuit_id, b.qty);
+          if (b.bid_details && Array.isArray(b.bid_details)) {
+              for (const item of b.bid_details) {
+                  await BackendService.adjustInventory(b.bidder_id, item.biscuitId, item.qty);
+              }
+          } else {
+              await BackendService.adjustInventory(b.bidder_id, b.biscuit_id, b.qty);
+          }
         }
       }
     }
@@ -656,7 +626,6 @@ export const BackendService = {
 
     // 5. Rollback if update fails
     if (error) {
-       console.error("Accept Trade Update Error:", error);
        await BackendService.adjustInventory(takerId, trade.request_biscuit_id, trade.request_qty);
        return { success: false, message: 'System error. Inventory refunded.' };
     }
@@ -680,17 +649,22 @@ export const BackendService = {
     
     if (!error && isNowComplete) {
         // Execute the Swap
-        // 1. Creator gets what they requested (from Taker's deducted stash)
-        await BackendService.adjustInventory(trade.creator_id, trade.request_biscuit_id, trade.request_qty);
         
-        // 2. Taker gets what was offered (from Creator's deducted stash)
-        // If Bundle:
+        // 1. Creator gets what they requested
+        if (trade.request_details && Array.isArray(trade.request_details)) {
+           for (const item of trade.request_details) {
+               await BackendService.adjustInventory(trade.creator_id, item.biscuitId, item.qty);
+           }
+        } else {
+           await BackendService.adjustInventory(trade.creator_id, trade.request_biscuit_id, trade.request_qty);
+        }
+        
+        // 2. Taker gets what was offered
         if (trade.offer_details && Array.isArray(trade.offer_details)) {
            for (const item of trade.offer_details) {
               await BackendService.adjustInventory(trade.taker_id, item.biscuitId, item.qty);
            }
         } else {
-           // Standard
            await BackendService.adjustInventory(trade.taker_id, trade.offer_biscuit_id, trade.offer_qty);
         }
         
@@ -718,7 +692,14 @@ export const BackendService = {
     const { data: bids } = await supabase.from('trade_bids').select('*').eq('trade_id', tradeId);
     if (bids) {
       for (const b of bids) {
-        await BackendService.adjustInventory(b.bidder_id, b.biscuit_id, b.qty);
+         // Refund Bidder
+         if (b.bid_details && Array.isArray(b.bid_details)) {
+            for (const item of b.bid_details) {
+                await BackendService.adjustInventory(b.bidder_id, item.biscuitId, item.qty);
+            }
+         } else {
+            await BackendService.adjustInventory(b.bidder_id, b.biscuit_id, b.qty);
+         }
       }
     }
     // Delete bids
