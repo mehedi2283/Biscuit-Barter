@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { User, Biscuit, ExchangeRule, InventoryItem, TradeLog, TradeResult, P2PTrade, P2PTradeType, TradeBid } from '../types';
+import { User, Biscuit, ExchangeRule, InventoryItem, TradeLog, TradeResult, P2PTrade, P2PTradeType, TradeBid, TradeItem } from '../types';
 
 // CONFIG
 const SUPABASE_URL = 'https://ggwhjljqmxvwjfelfgxz.supabase.co';
@@ -437,6 +437,7 @@ export const BackendService = {
       takerName: t.taker_name,
       offerBiscuitId: t.offer_biscuit_id,
       offerQty: t.offer_qty,
+      offerDetails: t.offer_details, // Map new Bundle column
       requestBiscuitId: t.request_biscuit_id,
       requestQty: t.request_qty,
       status: t.status,
@@ -468,6 +469,7 @@ export const BackendService = {
       takerName: t.taker_name,
       offerBiscuitId: t.offer_biscuit_id,
       offerQty: t.offer_qty,
+      offerDetails: t.offer_details,
       requestBiscuitId: t.request_biscuit_id,
       requestQty: t.request_qty,
       status: t.status,
@@ -479,12 +481,29 @@ export const BackendService = {
     }));
   },
 
-  createP2PTrade: async (userId: string, offerBiscuitId: string, offerQty: number, reqBiscuitId: string, reqQty: number, tradeType: P2PTradeType = 'FIXED', isAny: boolean = false): Promise<TradeResult> => {
+  createP2PTrade: async (userId: string, offerBiscuitId: string, offerQty: number, reqBiscuitId: string, reqQty: number, tradeType: P2PTradeType = 'FIXED', isAny: boolean = false, offerBundle?: TradeItem[]): Promise<TradeResult> => {
     const user = await BackendService.getUserById(userId);
     if (!user) return { success: false, message: 'User not found' };
 
-    const success = await BackendService.adjustInventory(userId, offerBiscuitId, -offerQty);
-    if (!success) return { success: false, message: 'Insufficient biscuits to post this trade.' };
+    // 1. Inventory Deduction Check & Execution
+    if (offerBundle && offerBundle.length > 0) {
+      // BUNDLE LOGIC
+      for (const item of offerBundle) {
+        const success = await BackendService.adjustInventory(userId, item.biscuitId, -item.qty);
+        if (!success) {
+           // Rollback previous deductions if one fails
+           for (const rbItem of offerBundle) {
+             if (rbItem.biscuitId === item.biscuitId) break; // Don't rollback current failed one
+             await BackendService.adjustInventory(userId, rbItem.biscuitId, rbItem.qty);
+           }
+           return { success: false, message: `Insufficient inventory for ${item.biscuitId}` };
+        }
+      }
+    } else {
+      // SINGLE ITEM LOGIC
+      const success = await BackendService.adjustInventory(userId, offerBiscuitId, -offerQty);
+      if (!success) return { success: false, message: 'Insufficient biscuits to post this trade.' };
+    }
 
     const payload: any = {
       creator_id: userId,
@@ -499,6 +518,10 @@ export const BackendService = {
       taker_confirmed: false
     };
 
+    if (offerBundle && offerBundle.length > 0) {
+      payload.offer_details = offerBundle;
+    }
+
     // Only add is_any if true to avoid schema cache errors on older DBs for standard trades
     if (isAny) {
       payload.is_any = true;
@@ -510,12 +533,18 @@ export const BackendService = {
       console.error("CREATE TRADE DB ERROR:", error);
       
       // Attempt Refund
-      await BackendService.adjustInventory(userId, offerBiscuitId, offerQty);
+      if (offerBundle && offerBundle.length > 0) {
+         for (const item of offerBundle) {
+           await BackendService.adjustInventory(userId, item.biscuitId, item.qty);
+         }
+      } else {
+         await BackendService.adjustInventory(userId, offerBiscuitId, offerQty);
+      }
       
       // PGRST204 is 'Could not find the column'
       // 42703 is 'undefined_column'
-      if (error.code === '42703' || error.code === 'PGRST204' || error.message?.includes('is_any')) {
-         return { success: false, message: 'System Sync Error: Please refresh the Database Schema Cache in Supabase settings to enable "Any" trades.' };
+      if (error.code === '42703' || error.code === 'PGRST204' || error.message?.includes('is_any') || error.message?.includes('offer_details')) {
+         return { success: false, message: 'System Sync Error: Please refresh the Database Schema Cache in Supabase settings.' };
       }
       return { success: false, message: `Database error: ${error.message}` };
     }
@@ -653,8 +682,17 @@ export const BackendService = {
         // Execute the Swap
         // 1. Creator gets what they requested (from Taker's deducted stash)
         await BackendService.adjustInventory(trade.creator_id, trade.request_biscuit_id, trade.request_qty);
+        
         // 2. Taker gets what was offered (from Creator's deducted stash)
-        await BackendService.adjustInventory(trade.taker_id, trade.offer_biscuit_id, trade.offer_qty);
+        // If Bundle:
+        if (trade.offer_details && Array.isArray(trade.offer_details)) {
+           for (const item of trade.offer_details) {
+              await BackendService.adjustInventory(trade.taker_id, item.biscuitId, item.qty);
+           }
+        } else {
+           // Standard
+           await BackendService.adjustInventory(trade.taker_id, trade.offer_biscuit_id, trade.offer_qty);
+        }
         
         return { success: true, message: 'Deal Done! Biscuits transferred successfully.' };
     }
@@ -668,7 +706,13 @@ export const BackendService = {
     if (trade.status !== 'OPEN') return { success: false, message: 'Cannot cancel active trade' };
 
     // Refund Creator
-    await BackendService.adjustInventory(userId, trade.offer_biscuit_id, trade.offer_qty);
+    if (trade.offer_details && Array.isArray(trade.offer_details)) {
+      for (const item of trade.offer_details) {
+         await BackendService.adjustInventory(userId, item.biscuitId, item.qty);
+      }
+    } else {
+      await BackendService.adjustInventory(userId, trade.offer_biscuit_id, trade.offer_qty);
+    }
     
     // Also Refund any active bids
     const { data: bids } = await supabase.from('trade_bids').select('*').eq('trade_id', tradeId);

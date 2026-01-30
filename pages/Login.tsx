@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Cookie, ArrowRight, UserPlus, LogIn, Lock, Loader2 } from 'lucide-react';
+import { Cookie, ArrowRight, UserPlus, LogIn, Lock, Loader2, CheckCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // Fix for framer-motion type issues
@@ -13,11 +13,13 @@ export const Login: React.FC = () => {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setSuccessMsg('');
     setIsSubmitting(true);
 
     if (!email || !password) {
@@ -37,10 +39,11 @@ export const Login: React.FC = () => {
         if (!res.success) {
           setError(res.message || 'Registration failed.');
         } else {
-          // On success registration, stay on login or show success message
-          setError('');
+          // Success: Switch to login view or just show success
+          setSuccessMsg(res.message || "Account created! Please login.");
           setIsRegistering(false); 
-          alert(res.message); // Simple feedback for registration success
+          // Clear sensitive fields
+          setPassword('');
         }
       } else {
         const res = await login(email, password);
@@ -141,6 +144,15 @@ export const Login: React.FC = () => {
             </MotionDiv>
           )}
 
+          {successMsg && (
+            <MotionDiv 
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+              className="text-emerald-400 text-xs text-center font-medium bg-emerald-400/10 py-3 px-2 rounded border border-emerald-500/20 flex items-center justify-center gap-2"
+            >
+              <CheckCircle size={14} /> {successMsg}
+            </MotionDiv>
+          )}
+
           <button 
             type="submit"
             disabled={isSubmitting}
@@ -165,6 +177,7 @@ export const Login: React.FC = () => {
             onClick={() => {
               setIsRegistering(!isRegistering);
               setError('');
+              setSuccessMsg('');
             }}
             className="text-amber-500 hover:text-amber-400 text-sm font-bold transition-colors uppercase tracking-wide"
           >

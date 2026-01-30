@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { BackendService, supabase } from '../services/backend';
-import { Biscuit, ExchangeRule, InventoryItem, P2PTrade } from '../types';
+import { Biscuit, ExchangeRule, InventoryItem, P2PTrade, TradeItem } from '../types';
 import { BiscuitIcon } from '../components/BiscuitIcon';
 import { TradeCard } from '../components/TradeCard';
 import { Modal } from '../components/Modal';
 import { CustomSelect } from '../components/CustomSelect';
 import { ConfirmModal } from '../components/ConfirmModal';
-import { Package, Plus, Minus, RefreshCcw, ShoppingBag, History, ArrowRight, Gavel, Trash2, CheckCircle, Loader2, Cookie, Upload, RefreshCw, Calendar, User, Clock } from 'lucide-react';
+import { Package, Plus, Minus, RefreshCcw, ShoppingBag, History, ArrowRight, Gavel, Trash2, CheckCircle, Loader2, Cookie, Upload, RefreshCw, Calendar, User, Clock, Layers } from 'lucide-react';
 import clsx from 'clsx';
 import { motion } from 'framer-motion';
 
@@ -35,6 +35,11 @@ export const Dashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'market' | 'p2p' | 'history'>('market');
   const [isLoading, setIsLoading] = useState(true);
 
+  // Loading States for Actions
+  const [isSubmittingTrade, setIsSubmittingTrade] = useState(false);
+  const [isSubmittingStock, setIsSubmittingStock] = useState(false);
+  const [isSubmittingItem, setIsSubmittingItem] = useState(false);
+
   // Modal State: Inventory
   const [isRestocking, setIsRestocking] = useState(false);
   const [manageMode, setManageMode] = useState<'add' | 'remove'>('add');
@@ -43,8 +48,14 @@ export const Dashboard: React.FC = () => {
 
   // Modal State: Create Trade
   const [isCreatingTrade, setIsCreatingTrade] = useState(false);
+  
+  // Single Item State (Fixed Price)
   const [offerId, setOfferId] = useState('');
   const [offerQty, setOfferQty] = useState(1);
+  
+  // Multi Item State (Auction Bundle)
+  const [bundleItems, setBundleItems] = useState<TradeItem[]>([]);
+  
   const [reqId, setReqId] = useState('');
   const [reqQty, setReqQty] = useState(1);
   const [tradeType, setTradeType] = useState<'FIXED' | 'AUCTION'>('FIXED');
@@ -103,7 +114,7 @@ export const Dashboard: React.FC = () => {
   const getQty = (id: string) => inventory.find(i => i.biscuitId === id)?.quantity || 0;
   const biscuitOptions = biscuits.map(b => ({ value: b.id, label: b.name, icon: b.icon }));
   
-  // Validation Helper
+  // Validation Helper for Single Item
   const maxOfferAvailable = offerId ? getQty(offerId) : 0;
 
   // Handlers
@@ -111,19 +122,21 @@ export const Dashboard: React.FC = () => {
     e.preventDefault();
     if (!user || !restockId) return;
 
-    const delta = manageMode === 'add' ? restockQty : -restockQty;
-    const success = await BackendService.adjustInventory(user.id, restockId, delta);
-    
-    if (success) {
-      setRestockQty(1);
-      setIsRestocking(false);
-      
-      // IMMEDIATE MANUAL REFRESH
-      const freshInventory = await BackendService.getUserInventory(user.id);
-      setInventory(freshInventory);
-      
-    } else {
-      alert("Failed to update inventory. Check if you have enough stock to remove.");
+    setIsSubmittingStock(true);
+    try {
+        const delta = manageMode === 'add' ? restockQty : -restockQty;
+        const success = await BackendService.adjustInventory(user.id, restockId, delta);
+        
+        if (success) {
+        setRestockQty(1);
+        setIsRestocking(false);
+        const freshInventory = await BackendService.getUserInventory(user.id);
+        setInventory(freshInventory);
+        } else {
+        alert("Failed to update inventory. Check if you have enough stock to remove.");
+        }
+    } finally {
+        setIsSubmittingStock(false);
     }
   };
 
@@ -147,57 +160,122 @@ export const Dashboard: React.FC = () => {
     }
   };
 
+  const handleAddBundleItem = () => {
+      // Default to first available item that isn't already 0 quantity (optional logic)
+      if (biscuits.length > 0) {
+          setBundleItems([...bundleItems, { biscuitId: biscuits[0].id, qty: 1 }]);
+      }
+  };
+
+  const updateBundleItem = (index: number, field: keyof TradeItem, value: any) => {
+      const newItems = [...bundleItems];
+      newItems[index] = { ...newItems[index], [field]: value };
+      setBundleItems(newItems);
+  };
+
+  const removeBundleItem = (index: number) => {
+      setBundleItems(bundleItems.filter((_, i) => i !== index));
+  };
+
   const handleCreateTrade = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !offerId) return;
+    if (!user) return;
 
-    // Validate again at submission
-    if (offerQty > maxOfferAvailable) {
-        alert(`You only have ${maxOfferAvailable} of this item.`);
-        return;
-    }
+    setIsSubmittingTrade(true);
+    try {
+        let finalOfferId = offerId;
+        let finalOfferQty = offerQty;
+        let finalOfferBundle: TradeItem[] | undefined = undefined;
 
-    let finalReqId = reqId;
-    let isAny = false;
+        // Validation based on Type
+        if (tradeType === 'AUCTION' && bundleItems.length > 0) {
+            // Bundle Validation
+            for (const item of bundleItems) {
+                const avail = getQty(item.biscuitId);
+                if (item.qty > avail) {
+                    alert(`Insufficient stock for ${getBiscuit(item.biscuitId)?.name}. You have ${avail}.`);
+                    setIsSubmittingTrade(false);
+                    return;
+                }
+            }
+            finalOfferBundle = bundleItems;
+            // Use first item as display placeholder
+            finalOfferId = bundleItems[0].biscuitId;
+            finalOfferQty = bundleItems[0].qty;
+        } else {
+            // Single Item Validation
+            if (!offerId) {
+                alert("Please select an item to offer.");
+                setIsSubmittingTrade(false);
+                return;
+            }
+            if (offerQty > maxOfferAvailable) {
+                alert(`You only have ${maxOfferAvailable} of this item.`);
+                setIsSubmittingTrade(false);
+                return;
+            }
+        }
 
-    // Detect "Any" choice
-    if (tradeType === 'AUCTION' && reqId === 'any') {
-        isAny = true;
-        // Use offerId as placeholder to satisfy DB constraint, but flag it as ANY
-        // If biscuits array is somehow empty, fallback to offerId
-        finalReqId = biscuits.length > 0 ? biscuits[0].id : offerId; 
-    }
+        let finalReqId = reqId;
+        let isAny = false;
 
-    if (!finalReqId) {
-        alert("Please select a valid item to request or enable 'Surprise Me'");
-        return;
-    }
+        // Detect "Any" choice
+        if (tradeType === 'AUCTION' && reqId === 'any') {
+            isAny = true;
+            // Use offerId (or first bundle item) as placeholder to satisfy DB constraint
+            finalReqId = finalOfferId || (biscuits.length > 0 ? biscuits[0].id : ''); 
+        }
 
-    const res = await BackendService.createP2PTrade(user.id, offerId, offerQty, finalReqId, reqQty, tradeType, isAny);
-    if (res.success) {
-      setIsCreatingTrade(false);
-      setOfferQty(1);
-      setReqQty(1);
-      setOfferId('');
-      setReqId('');
-      
-      const [freshInv, freshTrades] = await Promise.all([
-        BackendService.getUserInventory(user.id),
-        BackendService.getP2PTrades()
-      ]);
-      setInventory(freshInv);
-      setP2PTrades(freshTrades);
-      
-    } else {
-      alert(res.message);
+        if (!finalReqId) {
+            alert("Please select a valid item to request or enable 'Surprise Me'");
+            setIsSubmittingTrade(false);
+            return;
+        }
+
+        const res = await BackendService.createP2PTrade(
+            user.id, finalOfferId, finalOfferQty, finalReqId, reqQty, tradeType, isAny, finalOfferBundle
+        );
+        
+        if (res.success) {
+            setIsCreatingTrade(false);
+            setOfferQty(1);
+            setReqQty(1);
+            setOfferId('');
+            setReqId('');
+            setBundleItems([]);
+            
+            const [freshInv, freshTrades] = await Promise.all([
+                BackendService.getUserInventory(user.id),
+                BackendService.getP2PTrades()
+            ]);
+            setInventory(freshInv);
+            setP2PTrades(freshTrades);
+        
+        } else {
+            alert(res.message);
+        }
+    } finally {
+        setIsSubmittingTrade(false);
     }
   };
 
   const handleAcceptTrade = (trade: P2PTrade) => {
     if (!user) return;
+    
+    // Construct Give Message
+    const giveMsg = trade.requestQty + " " + (getBiscuit(trade.requestBiscuitId)?.name || "Items");
+    
+    // Construct Get Message
+    let getMsg = "";
+    if (trade.offerDetails && trade.offerDetails.length > 0) {
+        getMsg = trade.offerDetails.map(item => `${item.qty} ${getBiscuit(item.biscuitId)?.name}`).join(", ");
+    } else {
+        getMsg = `${trade.offerQty} ${getBiscuit(trade.offerBiscuitId)?.name}`;
+    }
+
     setConfirmState({
       isOpen: true,
-      msg: `Accept this trade? You will give ${trade.requestQty} ${getBiscuit(trade.requestBiscuitId)?.name} and receive ${trade.offerQty} ${getBiscuit(trade.offerBiscuitId)?.name}.`,
+      msg: `Accept this trade? You will give ${giveMsg} and receive ${getMsg}.`,
       onConfirm: async () => {
          const res = await BackendService.acceptP2PTrade(trade.id, user.id);
          if (!res.success) alert(res.message);
@@ -268,12 +346,17 @@ export const Dashboard: React.FC = () => {
         return;
     }
 
-    const res = await BackendService.createBiscuit(user.id, formName, formBrand, formIcon || '🍪', formColor);
-    if (res.success) {
-        setIsCreatingBiscuit(false);
-        setBiscuits(await BackendService.getBiscuits());
-    } else {
-        alert(res.error);
+    setIsSubmittingItem(true);
+    try {
+        const res = await BackendService.createBiscuit(user.id, formName, formBrand, formIcon || '🍪', formColor);
+        if (res.success) {
+            setIsCreatingBiscuit(false);
+            setBiscuits(await BackendService.getBiscuits());
+        } else {
+            alert(res.error);
+        }
+    } finally {
+        setIsSubmittingItem(false);
     }
   };
 
@@ -405,18 +488,37 @@ export const Dashboard: React.FC = () => {
                     if (!offerB || !reqB) return null;
                     const canAfford = getQty(trade.requestBiscuitId) >= trade.requestQty;
 
+                    // Handle Bundles Visual
+                    const isBundle = trade.offerDetails && trade.offerDetails.length > 0;
+
                     return (
                       <div key={trade.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 md:p-8 flex flex-col lg:flex-row items-center justify-between gap-6 hover:border-slate-700 transition-colors shadow-sm">
                          <div className="flex items-center gap-6 md:gap-10 flex-1 w-full justify-center lg:justify-start">
-                            <div className="flex flex-col items-center gap-2">
-                               <BiscuitIcon biscuit={offerB} size="sm" className="md:w-20 md:h-20 md:text-4xl" />
-                               <span className="text-xs md:text-base font-bold text-slate-400">x{trade.offerQty} {offerB.name}</span>
+                            {/* OFFER SIDE */}
+                            <div className="flex flex-col items-center gap-2 relative">
+                               {isBundle ? (
+                                   <div className="relative">
+                                       <div className="absolute -right-2 -top-2 z-10 bg-amber-500 text-slate-900 font-bold text-[10px] px-2 py-0.5 rounded-full border border-white shadow-sm">
+                                           +{trade.offerDetails!.length - 1} More
+                                       </div>
+                                       {/* Stack Effect */}
+                                       <div className="absolute top-1 left-1 w-full h-full bg-slate-800 rounded-full opacity-50 -z-10 translate-x-1 translate-y-1"></div>
+                                       <BiscuitIcon biscuit={offerB} size="sm" className="md:w-20 md:h-20 md:text-4xl" />
+                                   </div>
+                               ) : (
+                                   <BiscuitIcon biscuit={offerB} size="sm" className="md:w-20 md:h-20 md:text-4xl" />
+                               )}
+                               
+                               <span className="text-xs md:text-base font-bold text-slate-400">
+                                   {isBundle ? "Mixed Bundle" : `x${trade.offerQty} ${offerB.name}`}
+                               </span>
                             </div>
                             
                             <div className="flex flex-col items-center justify-center px-2">
                                 <ArrowRight className="text-slate-600 w-6 h-6 md:w-8 md:h-8" />
                             </div>
 
+                            {/* REQUEST SIDE */}
                             <div className="flex flex-col items-center gap-2">
                                {trade.isAny ? (
                                    <div className="w-10 h-10 md:w-20 md:h-20 flex items-center justify-center text-2xl md:text-4xl bg-slate-800 rounded-full border border-slate-700 shadow-inner">🎁</div>
@@ -480,6 +582,8 @@ export const Dashboard: React.FC = () => {
                     else partnerName = "Pending...";
                  }
 
+                 const isBundle = trade.offerDetails && trade.offerDetails.length > 0;
+
                  return (
                     <div key={trade.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 md:p-8 flex flex-col lg:flex-row items-center gap-6 shadow-sm">
                         {/* 1. STATUS & DATE */}
@@ -501,8 +605,16 @@ export const Dashboard: React.FC = () => {
                                  <div className="flex flex-col items-end">
                                     <span className="text-[10px] md:text-xs uppercase font-bold text-slate-500 mb-1">{isCreator ? "You Offered" : "Partner Offered"}</span>
                                     <span className="text-sm md:text-xl font-bold text-white flex items-center gap-3">
-                                       {trade.offerQty} {offerB.name}
-                                       <BiscuitIcon biscuit={offerB} size="sm" className="w-8 h-8 md:w-12 md:h-12 text-sm md:text-xl"/>
+                                       {isBundle ? (
+                                           <span className="flex items-center gap-2">
+                                             <Layers size={18} className="text-amber-500"/> Bundle ({trade.offerDetails!.length} Items)
+                                           </span>
+                                       ) : (
+                                           <>
+                                            {trade.offerQty} {offerB.name}
+                                            <BiscuitIcon biscuit={offerB} size="sm" className="w-8 h-8 md:w-12 md:h-12 text-sm md:text-xl"/>
+                                           </>
+                                       )}
                                     </span>
                                  </div>
                               </div>
@@ -636,13 +748,13 @@ export const Dashboard: React.FC = () => {
           </div>
           <button 
              type="submit" 
-             disabled={!restockId} 
+             disabled={!restockId || isSubmittingStock} 
              className={clsx(
-               "w-full py-4 rounded-xl font-bold text-sm md:text-base shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed text-white uppercase tracking-wide",
+               "w-full py-4 rounded-xl font-bold text-sm md:text-base shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed text-white uppercase tracking-wide flex items-center justify-center gap-2",
                manageMode === 'add' ? "bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/20" : "bg-red-600 hover:bg-red-500 shadow-red-900/20"
              )}
           >
-            {manageMode === 'add' ? 'Confirm Addition' : 'Confirm Removal'}
+            {isSubmittingStock ? <Loader2 className="animate-spin" size={20}/> : (manageMode === 'add' ? 'Confirm Addition' : 'Confirm Removal')}
           </button>
         </form>
       </Modal>
@@ -653,14 +765,14 @@ export const Dashboard: React.FC = () => {
         onClose={() => setIsCreatingTrade(false)} 
         title="New Listing" 
         icon={<RefreshCw className="text-amber-500"/>}
-        maxWidth="max-w-4xl"
+        maxWidth="max-w-5xl"
       >
          <form onSubmit={handleCreateTrade} className="space-y-8">
             {/* Header Tabs */}
             <div className="flex gap-4 bg-slate-950 p-1.5 rounded-xl border border-slate-800">
                <button 
                  type="button"
-                 onClick={() => setTradeType('FIXED')}
+                 onClick={() => { setTradeType('FIXED'); setBundleItems([]); }}
                  className={clsx(
                    "flex-1 py-3 text-sm md:text-base font-bold uppercase tracking-wide rounded-lg transition-all flex items-center justify-center gap-2",
                    tradeType === 'FIXED' 
@@ -685,78 +797,121 @@ export const Dashboard: React.FC = () => {
             </div>
 
             {/* Horizontal Layout */}
-            <div className="flex flex-col md:flex-row items-center gap-6">
+            <div className="flex flex-col md:flex-row items-start gap-6">
                {/* Left: YOU GIVE */}
-               <div className="flex-1 w-full space-y-3 p-6 bg-slate-950 rounded-2xl border border-slate-800 shadow-inner">
-                  <span className="text-xs uppercase font-bold text-emerald-500 flex items-center gap-2 mb-3">
-                    <ArrowRight size={14} className="rotate-180" /> You Give
-                  </span>
-                  
-                  <div className="flex items-center gap-3">
-                     <div className="flex-1">
-                        <CustomSelect 
-                           value={offerId} 
-                           onChange={(val) => {
-                             setOfferId(val);
-                             setOfferQty(1); // Reset qty on change
-                           }} 
-                           options={biscuitOptions} 
-                           placeholder="Select Item"
-                        />
-                     </div>
+               <div className="flex-1 w-full space-y-3 p-6 bg-slate-950 rounded-2xl border border-slate-800 shadow-inner min-h-[300px] flex flex-col">
+                  <div className="flex justify-between items-center mb-3">
+                    <span className="text-xs uppercase font-bold text-emerald-500 flex items-center gap-2">
+                        <ArrowRight size={14} className="rotate-180" /> You Give {tradeType === 'AUCTION' && "(Bundle)"}
+                    </span>
+                    {tradeType === 'AUCTION' && (
+                        <button type="button" onClick={handleAddBundleItem} className="text-[10px] bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded border border-slate-700 text-slate-300 font-bold uppercase transition-colors">
+                            + Add Item
+                        </button>
+                    )}
                   </div>
                   
-                  <div className={clsx("flex items-center border rounded-xl mt-3 h-12 transition-colors", !offerId ? "border-slate-800 bg-slate-900/50 opacity-50" : "border-slate-700 bg-slate-900")}>
-                    <button 
-                        type="button" 
-                        disabled={!offerId || offerQty <= 1}
-                        onClick={() => setOfferQty(Math.max(1, offerQty - 1))} 
-                        className="w-12 h-full flex items-center justify-center text-slate-400 hover:text-white border-r border-slate-700 active:bg-slate-800 rounded-l-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        <Minus size={18}/>
-                    </button>
-                    
-                    <input 
-                      type="number" min="1" max={maxOfferAvailable}
-                      value={offerQty} 
-                      disabled={!offerId}
-                      onChange={e => {
-                          const val = parseInt(e.target.value) || 0;
-                          setOfferQty(Math.max(1, Math.min(val, maxOfferAvailable)));
-                      }} 
-                      className="flex-1 bg-transparent text-center text-white font-bold font-mono outline-none text-lg disabled:cursor-not-allowed disabled:text-slate-500"
-                    />
-                    
-                    <button 
-                        type="button" 
-                        disabled={!offerId || offerQty >= maxOfferAvailable}
-                        onClick={() => setOfferQty(Math.min(maxOfferAvailable, offerQty + 1))} 
-                        className="w-12 h-full flex items-center justify-center text-slate-400 hover:text-white border-l border-slate-700 active:bg-slate-800 rounded-r-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        <Plus size={18}/>
-                    </button>
-                  </div>
-                  {offerId && (
-                     <div className="flex justify-between items-center text-[10px] font-bold mt-1 px-1">
-                         <span className="text-slate-500 uppercase tracking-wider">Inventory Limit</span>
-                         <span className={clsx("transition-colors", offerQty === maxOfferAvailable ? "text-amber-500" : "text-slate-400")}>{offerQty} / {maxOfferAvailable}</span>
-                     </div>
+                  {tradeType === 'AUCTION' && bundleItems.length > 0 ? (
+                      <div className="space-y-3 flex-1 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar">
+                          {bundleItems.map((item, idx) => {
+                              const avail = getQty(item.biscuitId);
+                              return (
+                                  <div key={idx} className="flex items-center gap-2 bg-slate-900 p-2 rounded-xl border border-slate-800">
+                                      <div className="flex-1">
+                                         <CustomSelect 
+                                            value={item.biscuitId}
+                                            onChange={(v) => updateBundleItem(idx, 'biscuitId', v)}
+                                            options={biscuitOptions}
+                                            className="text-xs"
+                                         />
+                                      </div>
+                                      <div className="w-20">
+                                          <input 
+                                            type="number" min="1" max={avail}
+                                            value={item.qty}
+                                            onChange={(e) => updateBundleItem(idx, 'qty', parseInt(e.target.value) || 1)}
+                                            className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2.5 px-2 text-center text-white font-bold text-sm outline-none focus:border-amber-500"
+                                          />
+                                      </div>
+                                      <button type="button" onClick={() => removeBundleItem(idx)} className="p-2.5 text-slate-500 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-colors"><Trash2 size={16}/></button>
+                                  </div>
+                              )
+                          })}
+                      </div>
+                  ) : (
+                    <div className="space-y-4">
+                        <div className="flex items-center gap-3">
+                            <div className="flex-1">
+                                <CustomSelect 
+                                value={offerId} 
+                                onChange={(val) => {
+                                    setOfferId(val);
+                                    setOfferQty(1); // Reset qty on change
+                                }} 
+                                options={biscuitOptions} 
+                                placeholder="Select Item"
+                                />
+                            </div>
+                        </div>
+                        
+                        <div className={clsx("flex items-center border rounded-xl h-12 transition-colors", !offerId ? "border-slate-800 bg-slate-900/50 opacity-50" : "border-slate-700 bg-slate-900")}>
+                            <button 
+                                type="button" 
+                                disabled={!offerId || offerQty <= 1}
+                                onClick={() => setOfferQty(Math.max(1, offerQty - 1))} 
+                                className="w-12 h-full flex items-center justify-center text-slate-400 hover:text-white border-r border-slate-700 active:bg-slate-800 rounded-l-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <Minus size={18}/>
+                            </button>
+                            
+                            <input 
+                            type="number" min="1" max={maxOfferAvailable}
+                            value={offerQty} 
+                            disabled={!offerId}
+                            onChange={e => {
+                                const val = parseInt(e.target.value) || 0;
+                                setOfferQty(Math.max(1, Math.min(val, maxOfferAvailable)));
+                            }} 
+                            className="flex-1 bg-transparent text-center text-white font-bold font-mono outline-none text-lg disabled:cursor-not-allowed disabled:text-slate-500"
+                            />
+                            
+                            <button 
+                                type="button" 
+                                disabled={!offerId || offerQty >= maxOfferAvailable}
+                                onClick={() => setOfferQty(Math.min(maxOfferAvailable, offerQty + 1))} 
+                                className="w-12 h-full flex items-center justify-center text-slate-400 hover:text-white border-l border-slate-700 active:bg-slate-800 rounded-r-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <Plus size={18}/>
+                            </button>
+                        </div>
+                        {offerId && (
+                            <div className="flex justify-between items-center text-[10px] font-bold mt-1 px-1">
+                                <span className="text-slate-500 uppercase tracking-wider">Inventory Limit</span>
+                                <span className={clsx("transition-colors", offerQty === maxOfferAvailable ? "text-amber-500" : "text-slate-400")}>{offerQty} / {maxOfferAvailable}</span>
+                            </div>
+                        )}
+                        {tradeType === 'AUCTION' && bundleItems.length === 0 && (
+                            <button type="button" onClick={handleAddBundleItem} className="w-full py-3 border border-dashed border-slate-700 rounded-xl text-slate-500 text-xs font-bold uppercase hover:border-amber-500 hover:text-amber-500 transition-colors">
+                                Switch to Multi-Item Bundle
+                            </button>
+                        )}
+                    </div>
                   )}
                </div>
                
                {/* Center Arrow */}
-               <div className="flex items-center justify-center text-slate-600 shrink-0">
+               <div className="flex items-center justify-center text-slate-600 shrink-0 self-center">
                   <ArrowRight className="hidden md:block text-slate-500" size={32} />
                   <ArrowRight className="block md:hidden rotate-90 text-slate-500" size={32} />
                </div>
 
                {/* Right: YOU GET / PREFERRED */}
-               <div className="flex-1 w-full space-y-3 p-6 bg-slate-950 rounded-2xl border border-slate-800 shadow-inner">
+               <div className="flex-1 w-full space-y-3 p-6 bg-slate-950 rounded-2xl border border-slate-800 shadow-inner min-h-[300px]">
                   <span className={clsx(
                       "text-xs uppercase font-bold flex items-center gap-2 mb-3",
                       tradeType === 'AUCTION' ? "text-purple-400" : "text-amber-500"
                   )}>
-                    <ArrowRight size={14} /> {tradeType === 'AUCTION' ? "Preferred (Optional)" : "You Get"}
+                    <ArrowRight size={14} /> {tradeType === 'AUCTION' ? "Preferred Request (Optional)" : "You Get"}
                   </span>
                   
                   <div className="flex items-center gap-3">
@@ -783,20 +938,27 @@ export const Dashboard: React.FC = () => {
                         <button type="button" onClick={() => setReqQty(reqQty + 1)} className="w-12 h-full flex items-center justify-center text-slate-400 hover:text-white border-l border-slate-700 active:bg-slate-800 rounded-r-xl transition-colors"><Plus size={18}/></button>
                     </div>
                   )}
+
+                  {tradeType === 'AUCTION' && (
+                      <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-500 mt-6 leading-relaxed">
+                          <p className="font-bold text-slate-400 mb-1">Auction Note:</p>
+                          In an auction, users can bid anything. The item you select here is just a <em>preference</em> to guide bidders. You can accept any incoming bid.
+                      </div>
+                  )}
                </div>
             </div>
 
             <button 
               type="submit" 
-              disabled={!offerId || (tradeType === 'FIXED' && !reqId)} 
+              disabled={(!offerId && bundleItems.length === 0) || (tradeType === 'FIXED' && !reqId) || isSubmittingTrade} 
               className={clsx(
-                "w-full font-bold py-5 rounded-xl shadow-xl transition-all text-base md:text-lg uppercase tracking-wide active:scale-[0.99]",
+                "w-full font-bold py-5 rounded-xl shadow-xl transition-all text-base md:text-lg uppercase tracking-wide active:scale-[0.99] flex items-center justify-center gap-3",
                 tradeType === 'AUCTION' 
                    ? "bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white" 
                    : "bg-amber-600 hover:bg-amber-500 text-white"
               )}
             >
-              {tradeType === 'AUCTION' ? "Start Auction" : "Post Fixed Trade"}
+              {isSubmittingTrade ? <Loader2 className="animate-spin" size={24}/> : (tradeType === 'AUCTION' ? "Start Auction" : "Post Fixed Trade")}
             </button>
          </form>
       </Modal>
@@ -848,8 +1010,8 @@ export const Dashboard: React.FC = () => {
               ))}
             </div>
           </div>
-          <button type="submit" className="w-full py-4 bg-amber-600 hover:bg-amber-500 rounded-xl text-white font-bold text-sm shadow-lg shadow-amber-900/20 active:scale-[0.98] uppercase tracking-wide">
-            Create Biscuit
+          <button type="submit" disabled={isSubmittingItem} className="w-full py-4 bg-amber-600 hover:bg-amber-500 rounded-xl text-white font-bold text-sm shadow-lg shadow-amber-900/20 active:scale-[0.98] uppercase tracking-wide flex items-center justify-center gap-2">
+            {isSubmittingItem ? <Loader2 className="animate-spin" size={20}/> : "Create Biscuit"}
           </button>
         </form>
       </Modal>
